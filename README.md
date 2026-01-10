@@ -1,286 +1,193 @@
-# 🚀 MultiOCR Setup Guide
+# 🚀 MultiOCR
 
-Complete setup instructions for the Multi-Model OCR system with human-in-the-loop correction, version control, and hash-based document identity.
+**MultiOCR** is a multi-model Optical Character Recognition (OCR) system with **hash-based document identity**, **version control**, and **human-in-the-loop post-correction**.
+It combines multiple OCR engines, applies a voting strategy, and tracks accuracy improvements using **Character Error Rate (CER)**.
+
+---
+
+## ✨ Key Features
+
+* 🔍 **Multi-Model OCR**
+  * PaddleOCR
+  * EasyOCR
+  * DeepSeek OCR (LLM-based via Ollama)
+  * Confidence + similarity-based voting
+
+* 🧬 **Hash-Based Deduplication**
+  * SHA256 image hashing
+  * Instant retrieval for duplicate uploads
+  * Zero redundant processing
+
+* 🗂️ **Version Control**
+  * v1: Raw OCR output
+  * v2: Human-corrected text
+  * Parent–child document tracking
+
+* 📏 **Accuracy Tracking**
+  * Character Error Rate (CER)
+  * Quantifies correction quality
+
+* ✍️ **Post-OCR Correction Engine**
+  * 360K+ word dictionary
+  * Learned OCR confusion pairs
+  * Domain-specific vocabulary (Sanskrit)
+  * Auto-fix & suggestion system
+
+* 🖼️ **Visualization**
+  * CRAFT-based character/line detection
+  * Bounding boxes & overlays
 
 ---
 
 ## 📋 Table of Contents
 
-- [Installation](#installation)
-- [Database Setup](#database-setup)
-- [Environment Configuration](#environment-configuration)
-- [Running the Application](#running-the-application)
-- [Usage Guide](#usage-guide)
-- [Architecture Overview](#architecture-overview)
-- [Project Structure](#project-structure)
+* [Installation](#-installation)
+* [Database Setup](#-database-setup)
+* [Environment Configuration](#-environment-configuration)
+* [Running the Application](#-running-the-application)
+* [Usage Guide](#-usage-guide)
+* [Architecture Overview](#-architecture-overview)
+* [Project Structure](#-project-structure)
+* [Quick Start](#-quick-start)
 
 ---
 
 ## 📦 Installation
 
-### 1. Clone or Download the Repository
+### 1. Clone the Repository
 
 ```bash
-cd C:\CODING\MultiOCRnew
-# If already downloaded, skip to next step
+git clone <repo-url>
+cd multiocr
 ```
 
-### 2. Create Virtual Environment
+### 2. Create & Activate Virtual Environment
 
 ```bash
-cd multiocr
 python -m venv .venv
 ```
 
-### 3. Activate Virtual Environment
+**Windows (PowerShell)**
 
-**Windows (PowerShell):**
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-**Windows (Command Prompt):**
-```cmd
-.venv\Scripts\activate.bat
-```
+**Linux / macOS**
 
-**Linux/Mac:**
 ```bash
 source .venv/bin/activate
 ```
 
-### 4. Install Python Dependencies
+### 3. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**Expected packages include:**
-- `Flask` - Web framework
-- `psycopg2-binary` - PostgreSQL adapter
-- `paddlepaddle` / `paddleocr` - PaddleOCR engine
-- `easyocr` - EasyOCR engine
-- `pytesseract` - Tesseract wrapper
-- `torch` / `torchvision` - PyTorch for CRAFT model
-- `python-Levenshtein` - CER calculation
-- `python-dotenv` - Environment management
-- `Pillow` - Image processing
-- And more...
+Main dependencies:
+
+* Flask
+* PaddleOCR
+* EasyOCR
+* PyTorch / TorchVision
+* PostgreSQL (psycopg2)
+* Levenshtein
+* Pillow
 
 ---
 
 ## 🗄️ Database Setup
 
-### 1. Start PostgreSQL Service
+### 1. Start PostgreSQL
 
-**Windows:**
+**Windows**
+
 ```powershell
-# Check if running
-Get-Service postgresql*
-
-# If not running, start it (adjust service name)
 Start-Service postgresql-x64-15
 ```
 
-**Linux:**
+**Linux**
+
 ```bash
 sudo systemctl start postgresql
-sudo systemctl enable postgresql  # Auto-start on boot
 ```
 
-### 2. Create Database User (if needed)
-
-Connect to PostgreSQL as admin:
-
-```sql
--- Create user
-CREATE USER postgres WITH PASSWORD 'pg1234';
-
--- Grant privileges
-ALTER USER postgres WITH SUPERUSER;
-```
-
-### 3. Run Database Setup Script
+### 2. Create Database & Tables
 
 ```bash
 python setup_database.py
 ```
 
-**Expected output:**
-```
-============================================================
-🗄️  MultiOCR Database Setup
-============================================================
-Host: localhost:5432
-Database: multiocrdb
-User: postgres
-============================================================
-
-✓ Database 'multiocrdb' already exists
-
-📋 Creating tables...
-  ✓ documents table created
-
-🔍 Creating indexes...
-  ✓ idx_image_hash - Hash-based lookup
-  ✓ idx_parent_id - Version tracking
-  ✓ idx_status - Status filtering
-  ✓ idx_created_at - Time-based sorting
-
-⚙️  Creating triggers...
-  ✓ Auto-update timestamp trigger created
-
-🔍 Verifying setup...
-  ✓ Documents table accessible (0 rows)
-
-============================================================
-✅ Database setup completed successfully!
-============================================================
-```
-
-### 4. Verify Database
+### 3. Verify Setup
 
 ```bash
-# Connect to database
 psql -U postgres -d multiocrdb
-
-# Check tables
 \dt
-
-# View schema
 \d documents
-
-# Exit
 \q
 ```
 
-**Expected table schema:**
-```
- Column         | Type                        | Description
-----------------+-----------------------------+--------------------------------
- id             | SERIAL PRIMARY KEY          | Auto-increment ID
- image_path     | TEXT NOT NULL               | Path to uploaded image
- image_hash     | VARCHAR(64)                 | SHA256 hash for deduplication
- ocr_text       | TEXT NOT NULL               | Original OCR output (v1)
- corrected_text | TEXT                        | Human-corrected text (v2)
- cer            | FLOAT                       | Character Error Rate
- parent_id      | INTEGER                     | Reference to parent document
- version        | INTEGER DEFAULT 1           | Version number (1=OCR, 2=corrected)
- status         | VARCHAR(20)                 | Status: pending/ocr/corrected
- text_embedding | JSONB                       | For similarity search
- created_at     | TIMESTAMP                   | Creation timestamp
- updated_at     | TIMESTAMP                   | Last update timestamp
-```
+### Documents Table Schema
+
+| Column           | Description                   |
+| ---------------- | ----------------------------- |
+| `image_hash`     | SHA256 hash for deduplication |
+| `ocr_text`       | OCR output (v1)               |
+| `corrected_text` | Human-corrected text (v2)     |
+| `cer`            | Character Error Rate          |
+| `parent_id`      | Version linkage               |
+| `status`         | pending / ocr / corrected     |
 
 ---
 
 ## ⚙️ Environment Configuration
 
-### 1. Copy Environment Template
-
 ```bash
 copy .env.example .env
 ```
 
-### 2. Edit `.env` File
+Edit `.env`:
 
-Open `.env` in a text editor and configure:
-
-```bash
-# Database Configuration
-DB_NAME=your_database_name
+```env
+DB_NAME=multiocrdb
 DB_USER=postgres
-DB_PASSWORD=your_actual_password_here
+DB_PASSWORD=your_password
 DB_HOST=localhost
 DB_PORT=5432
 
-# GPU Configuration
-# Set to true if you have CUDA-compatible GPU
 USE_GPU=false
-
-# PaddleOCR Configuration
-# Disable model download check to avoid connectivity issues
 DISABLE_MODEL_SOURCE_CHECK=True
 ```
 
+---
 
 ## 🚀 Running the Application
 
-### 1. Start the Flask Application
-
 ```bash
-python web\app.py
+python web/app.py
 ```
 
-**Expected startup output:**
-```
-Initializing OCR models...
-✓ PaddleOCR loaded successfully!
-✓ EasyOCR loaded successfully!
-✓ DeepSeek OCR loaded successfully!
+Open in browser:
 
-📚 Initializing PostOCR correction module...
-✅ PostOCR correction module ready for use!
-
-✅ OCR models loaded successfully!
-
-============================================================
-🚀 Initializing CRAFT model at startup...
-============================================================
-✓ CRAFT model loaded successfully!
-
- * Serving Flask app 'app'
- * Debug mode: on
- * Running on http://127.0.0.1:5000
- * Running on http://192.168.1.37:5000
-```
-
-### 2. Access the Application
-
-Open your web browser and navigate to:
-- **Local**: http://127.0.0.1:5000
-- **Network**: http://192.168.1.37:5000 (accessible from other devices on same network)
-
-### 3. Stop the Application
-
-Press `Ctrl+C` in the terminal to stop the server.
+* [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
 ---
 
 ## 📖 Usage Guide
 
-### Basic Workflow
+1. **Upload Image**: Click "Upload Image" and select a Devanagari manuscript image
+2. **View Results**: Get OCR results from multiple models:
+   - PaddleOCR (Devanagari)
+   - EasyOCR (Hindi)
+   - DeepSeek OCR (LLM-based)
+3. **Voting Result**: View consolidated text from all models
+4. **Post-Correction**: Apply dictionary-based corrections
+5. **Character Error Rate**: See CER metrics for quality assessment
+6. **Visualizations**: View character detection bounding boxes
+7. **Download**: Export results as JSON or save to database
 
-#### 1. **Upload Image**
-   - Drag & drop or click "Browse" to select an image
-   - Supported formats: PNG, JPG, JPEG, GIF, BMP, TIFF
-   - Maximum size: 16MB
-
-#### 2. **Process OCR**
-   - Click **"Parse Document"** button
-   - System will:
-     - Compute SHA256 hash of the image
-     - Check if image was processed before
-     - If new: Run OCR with PaddleOCR, EasyOCR, and DeepSeek
-     - If duplicate: Return existing results
-
-#### 3. **View Results**
-   - **OCR Text**: Extracted text appears in the text area
-   - **Visualization**: Character detection bounding boxes
-   - **Metrics**: Processing time, confidence scores, line count
-
-#### 4. **Review & Correct** (Optional)
-   - Click **"Review & Correct Text"**
-   - Compare OCR output (left) with corrected text (right)
-   - Edit the corrected text as needed
-   - Click **"Save Correction"** to create v2
-
-#### 5. **Post-OCR Correction** (Advanced)
-   - **Detect Errors**: Click to find potential OCR mistakes
-   - **Auto Fix**: Automatically correct common errors using dictionary
-   - **Add to Dictionary**: Save custom corrections for future use
-
-### Advanced Features
+---
 
 #### Version Control
 - **v1 (OCR)**: Original OCR output
@@ -290,218 +197,105 @@ Press `Ctrl+C` in the terminal to stop the server.
 #### Hash-Based Deduplication
 - Each uploaded image gets a unique SHA256 hash
 - Re-uploading the same image returns cached results instantly
-- No re-processing needed for duplicates
-
-#### Character Error Rate (CER)
-```
-CER = Levenshtein Distance / Length of Ground Truth
-
-• < 0.05:   Excellent 🎯
-• 0.05-0.15: Good ✅
-• 0.15-0.30: Moderate ⚠️
-• > 0.30:    Needs Improvement 🔧
-```
-
-#### Semantic Similarity (If Enabled)
-- Find similar documents based on text embeddings
-- Useful for finding reference documents when correcting
-
 ---
 
-## 🏗️ Architecture Overview
+## 🏗️ Architecture
 
-### System Components
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Web Interface                        │
-│                  (Flask + HTML/CSS/JS)                  │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-        ┌─────────────┴─────────────┐
-        │                           │
-┌───────▼────────┐          ┌──────▼────────┐
-│  OCR Pipeline  │          │   Database    │
-│                │          │  (PostgreSQL) │
-│ • PaddleOCR    │          │               │
-│ • EasyOCR      │◄─────────┤ • documents   │
-│ • DeepSeek     │          │ • versions    │
-│ • Voting       │          │ • embeddings  │
-└────────┬───────┘          └───────────────┘
-         │
-         │
-┌────────▼───────────────────────────────────┐
-│          PostOCR Correction                │
-│                                            │
-│ • Dictionary (360K+ words)                 │
-│ • Confusion Pairs (learned patterns)       │
-│ • Domain Words (Sanskrit-specific)         │
-│ • Trie-based Fast Search                  │
-└────────────────────────────────────────────┘
-```
-
-### Hash-Based Document Identity
+### System Flow
 
 ```
-Upload Image → Compute SHA256 Hash → Check Database
-                                          ↓
-                            ┌─────────────┴─────────────┐
-                            ↓                           ↓
-                    Hash Exists                  Hash New
-                    (Return v1/v2)              (Process OCR)
-                            ↓                           ↓
-                    Show Existing Results        Save as v1
-                                                        ↓
-                                            Human Correction
-                                                        ↓
-                                                Save as v2
-                                            (parent_id = v1.id)
+Upload → Hash Check → OCR (PaddleOCR/EasyOCR/DeepSeek) → Voting → Post-Correction → Store
 ```
 
-### OCR Voting System
+### Hash-Based Deduplication
 
-```
-PaddleOCR ──┐
-            ├──► Voting Logic ──► Final Result
-EasyOCR  ───┤    (Confidence    (Deduplicated)
-            │     + Similarity)
-DeepSeek ───┘
-```
+- SHA256 hash computed for each uploaded image
+- Duplicate detection prevents re-processing
+- Version tracking (v1: OCR, v2: Corrected)
+
+### OCR Voting
+
+- Confidence-based character selection across models
+- Similarity scoring with difflib
+- Deduplicated final output
 
 ---
-
 
 ## 📁 Project Structure
 
 ```
 multiocr/
-├── 📄 SETUP.md                    # This file
-├── 📄 setup_database.py           # Database initialization script
-├── 📄 requirements.txt            # Python dependencies
-├── 📄 .env.example                # Environment template
-├── 📄 .env                        # Your configuration (not in git)
-│
-├── 📁 web/                        # Flask application
-│   ├── app.py                     # Main Flask app
-│   ├── templates/                 # HTML templates
-│   │   ├── index.html             # Main UI
-│   │   └── review_new.html        # Review/correction interface
-│   └── static/                    # CSS, JS, images
-│       ├── style.css
-│       └── script.js
-│
-├── 📁 ocr/                        # OCR engines
-│   ├── paddle_ocr.py              # PaddleOCR implementation
-│   ├── easy_ocr.py                # EasyOCR implementation
-│   ├── deepseek_ocr.py            # DeepSeek OCR via Ollama
-│   ├── voting.py                  # Multi-model voting
-│   ├── benchmark.py               # Performance metrics
-│   └── normalize.py               # Text normalization
-│
-├── 📁 src/                        # Core modules
-│   ├── database/                  # Database utilities
-│   │   ├── db.py                  # Database connection
-│   │   └── migrate_db.py          # Legacy migration script
-│   ├── utils/                     # Utility functions
-│   │   ├── cer.py                 # CER calculation
-│   │   └── image_hash.py          # SHA256 hashing
-│   └── similarity/                # Semantic search (optional)
-│       ├── embeddings.py
-│       └── search.py
-│
-├── 📁 postOCR/                    # Post-correction module
-│   ├── data/                      # Dictionaries and wordlists
-│   │   ├── Dict.txt               # Base dictionary (360K words)
-│   │   ├── learned_confusions.txt # OCR error patterns
-│   │   ├── learned_domain_words.txt # Custom words
-│   │   ├── scraped_samhita.txt    # Sanskrit terms (38K)
-│   │   └── ccras_wordlist.txt     # CCRAS wordlist (55K)
-│   └── src/                       # Correction engine
-│       └── core/
-│           ├── corrector.py
-│           ├── dictionary.py
-│           └── confusion_pairs.py
-│
-├── 📁 char_visualisation/         # CRAFT model for visualization
-│   └── line-segmentation/
-│       └── pretrained_craft/
-│           └── craft_mlt_25k.pth  # Pre-trained model
-│
-├── 📁 uploads/                    # Uploaded images
-│   └── visualizations/            # Generated visualizations
-│
-├── 📁 logs/                       # Application logs
-└── 📁 docs/                       # Additional documentation
-    ├── IMPLEMENTATION_SUMMARY.md
-    ├── QUICKSTART.md
-    └── ...
+├── web/              # Flask application
+├── ocr/              # OCR engines (PaddleOCR, EasyOCR, DeepSeek)
+├── postOCR/          # Dictionary & correction logic
+├── similarity/       # Embeddings & semantic search
+├── database/         # PostgreSQL models
+├── static/           # CSS, JS, visualizations
+├── templates/        # HTML templates
+├── char_visualisation/  # CRAFT character detection
+├── docs/             # Documentation
+└── scripts/          # Utility scripts
 ```
 
 ---
-
-## 🎯 Key Features Summary
-
-### ✅ Multi-Model OCR
-- **PaddleOCR**: Chinese/English/Devanagari support
-- **EasyOCR**: 80+ languages
-- **DeepSeek OCR**: LLM-based OCR via Ollama
-- **Voting System**: Combines results for best accuracy
-
-### ✅ Hash-Based Deduplication
-- SHA256 hashing prevents redundant processing
-- Instant retrieval of previously processed documents
-- Saves computation time and resources
-
-### ✅ Version Control
-- Track OCR output (v1) and corrections (v2)
-- Parent-child relationships between versions
-- Complete audit trail of changes
-
-### ✅ CER Tracking
-- Quantify OCR accuracy improvement
-- Measure correction quality
-- Identify problematic documents
-
-### ✅ Post-OCR Correction
-- 360K+ word dictionary
-- Learned confusion patterns
-- Domain-specific vocabulary (Sanskrit)
-- Real-time error detection
-- Auto-correction suggestions
-
-### ✅ Visualization
-- CRAFT-based character detection
-- Bounding box visualization
-- Confidence heatmaps
-
-### ✅ Performance
-- GPU acceleration (optional)
-- Model caching and reuse
-- Efficient database indexing
-- Fast trie-based search
-
 ---
 
-## 🚀 Quick Start Commands
+## 🚀 Quick Start
 
 ```bash
-# 1. Setup (one time only)
+# Clone and setup
 cd multiocr
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+# Configure
 copy .env.example .env
-# Edit .env with your database password
+# Edit .env with your settings
+
+# Setup database
 python setup_database.py
 
-# 2. Run application (every time)
-.venv\Scripts\Activate.ps1
-python web\app.py
-
-# 3. Access in browser
-# http://127.0.0.1:5000
+# Run
+python web/app.py
 ```
 
+Access at [http://127.0.0.1:5000](http://127.0.0.1:5000)
+
 ---
+
+## 📚 Documentation
+
+- [SETUP.md](SETUP.md) - Detailed setup guide with troubleshooting
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) - Fast-track guide
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design details
+- [docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md) - Model training instructions
+
+---
+
+## 📊 Status
+
+- ✅ **Actively developed** - Regular updates and improvements
+- 🔬 **Research & production** - Used in both research workflows and production pipelines
+- 🔧 **Extensible** - Easy to add new OCR engines or post-processors
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please ensure:
+- Code follows existing patterns
+- Tests pass
+- Documentation updated
+
+---
+
+## 📄 License
+
+MIT License - See LICENSE file for details
+
+---
+
+**Note**: See [SETUP.md](SETUP.md) for comprehensive setup instructions including troubleshooting, verification steps, and detailed configuration options.
 
 
