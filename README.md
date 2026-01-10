@@ -42,11 +42,9 @@ It combines multiple OCR engines, applies a voting strategy, and tracks accuracy
 ## 📋 Table of Contents
 
 * [Installation](#-installation)
-* [Database Setup](#-database-setup)
-* [Environment Configuration](#-environment-configuration)
-* [Running the Application](#-running-the-application)
+* [Database Schema](#-database-schema)
 * [Usage Guide](#-usage-guide)
-* [Architecture Overview](#-architecture-overview)
+* [Architecture](#-architecture)
 * [Project Structure](#-project-structure)
 * [Quick Start](#-quick-start)
 
@@ -54,81 +52,57 @@ It combines multiple OCR engines, applies a voting strategy, and tracks accuracy
 
 ## 📦 Installation
 
-### 1. Clone the Repository
+### 1. Clone & Setup Environment
 
 ```bash
 git clone <repo-url>
 cd multiocr
-```
-
-### 2. Create & Activate Virtual Environment
-
-```bash
 python -m venv .venv
 ```
 
-**Windows (PowerShell)**
+**Activate virtual environment:**
 
-```powershell
-.venv\Scripts\Activate.ps1
-```
+Windows: `.venv\Scripts\Activate.ps1`  
+Linux/macOS: `source .venv/bin/activate`
 
-**Linux / macOS**
-
-```bash
-source .venv/bin/activate
-```
-
-### 3. Install Dependencies
+### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Main dependencies:
-
-* Flask
-* PaddleOCR
-* EasyOCR
-* PyTorch / TorchVision
-* PostgreSQL (psycopg2)
-* Levenshtein
-* Pillow
-
----
-
-## 🗄️ Database Setup
-
-### 1. Start PostgreSQL
-
-**Windows**
-
-```powershell
-Start-Service postgresql-x64-15
-```
-
-**Linux**
+### 3. Configure Environment
 
 ```bash
-sudo systemctl start postgresql
+copy .env.example .env
 ```
 
-### 2. Create Database & Tables
+Edit `.env` - **Only change these two lines:**
+
+```env
+DB_NAME=multiocrdb
+DB_PASSWORD=your_postgres_password
+```
+
+### 4. Setup Database
 
 ```bash
 python setup_database.py
 ```
 
-### 3. Verify Setup
+✅ **Done!** Your database is ready with all tables and indexes.
+
+### 5. Run Application
 
 ```bash
-psql -U postgres -d multiocrdb
-\dt
-\d documents
-\q
+python web/app.py
 ```
 
-### Documents Table Schema
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your browser.
+
+---
+
+## 🗄️ Database Schema
 
 | Column           | Description                   |
 | ---------------- | ----------------------------- |
@@ -138,39 +112,6 @@ psql -U postgres -d multiocrdb
 | `cer`            | Character Error Rate          |
 | `parent_id`      | Version linkage               |
 | `status`         | pending / ocr / corrected     |
-
----
-
-## ⚙️ Environment Configuration
-
-```bash
-copy .env.example .env
-```
-
-Edit `.env`:
-
-```env
-DB_NAME=multiocrdb
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_HOST=localhost
-DB_PORT=5432
-
-USE_GPU=false
-DISABLE_MODEL_SOURCE_CHECK=True
-```
-
----
-
-## 🚀 Running the Application
-
-```bash
-python web/app.py
-```
-
-Open in browser:
-
-* [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
 ---
 
@@ -243,24 +184,23 @@ multiocr/
 ## 🚀 Quick Start
 
 ```bash
-# Clone and setup
-cd multiocr
+# 1. Setup
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1  # Windows
 pip install -r requirements.txt
 
-# Configure
+# 2. Configure
 copy .env.example .env
-# Edit .env with your settings
+# Edit .env: Set DB_PASSWORD=your_password
 
-# Setup database
+# 3. Initialize
 python setup_database.py
 
-# Run
+# 4. Run
 python web/app.py
 ```
 
-Access at [http://127.0.0.1:5000](http://127.0.0.1:5000)
+→ Open [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
 ---
 
