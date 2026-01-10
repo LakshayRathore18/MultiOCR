@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Review & Correct - OCR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='review_new.css') }}">
+    <style>
+        /* Custom Notification Styles */
+        .notification-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+        }
+        
+        .notification {
+            background: white;
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s;
+            border-left: 4px solid;
+            min-width: 300px;
+        }
+        
+        .notification.success {
+            border-left-color: #4caf50;
+            background: linear-gradient(to right, #f1f8f4, white);
+        }
+        
+        .notification.error {
+            border-left-color: #f44336;
+            background: linear-gradient(to right, #fef3f2, white);
+        }
+        
+        .notification.warning {
+            border-left-color: #ff9800;
+            background: linear-gradient(to right, #fff8f0, white);
+        }
+        
+        .notification.info {
+            border-left-color: #2196F3;
+            background: linear-gradient(to right, #f0f7ff, white);
+        }
+        
+        .notification-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        
+        .notification-content {
+            flex: 1;
+        }
+        
+        .notification-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #333;
+        }
+        
+        .notification-message {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.4;
+        }
+        
+        .notification-close {
+            cursor: pointer;
+            color: #999;
+            font-size: 20px;
+            line-height: 1;
+            padding: 0 4px;
+            transition: color 0.2s;
+        }
+        
+        .notification-close:hover {
+            color: #333;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateX(400px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Notification Container -->
+    <div class="notification-container" id="notificationContainer"></div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>✏️ Review & Correct OCR Output</h1>
+            <a href="/" class="btn-back-header">⬅️ Back Home</a>
+        </div>
+        
+        <div class="grid">
+            <!-- LEFT PANEL: Original Image & OCR Output -->
+            <div class="panel">
+                <h2>📄 Original Document</h2>
+                <img src="{{ url_for('static', filename='../') }}{{ image_path }}" alt="Document" class="image-preview">
+                
+                <h2 style="margin-top: 20px;">🤖 OCR Output</h2>
+                <div class="ocr-text">{{ ocr_text }}</div>
+                
+                {% if cer is not none %}
+                <div class="cer-display" id="cerDisplay">
+                    <h3>📊 Character Error Rate (CER)</h3>
+                    <div class="cer-value" id="cerValue">{{ "%.4f"|format(cer) }}</div>
+                    <p style="margin: 8px 0 0 0; color: #555;" id="cerAccuracy">
+                        {% if cer < 0.05 %}Excellent accuracy! 🎯
+                        {% elif cer < 0.15 %}Good accuracy ✅
+                        {% elif cer < 0.30 %}Moderate accuracy ⚠️
+                        {% else %}Needs improvement 🔧{% endif %}
+                    </p>
+                </div>
+                {% else %}
+                <div class="cer-display" id="cerDisplay" style="display: none;">
+                    <h3>📊 Character Error Rate (CER)</h3>
+                    <div class="cer-value" id="cerValue">-</div>
+                    <p style="margin: 8px 0 0 0; color: #555;" id="cerAccuracy">Save to calculate accuracy</p>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- RIGHT PANEL: Corrected Text -->
+            <div class="panel">
+                <h2>✨ Corrected Text</h2>
+                
+                <!-- Correction Textarea -->
+                <form id="correctionForm">
+                    <textarea id="correctedText" name="corrected_text" placeholder="Type the corrected text here..." required>{{ corrected_text or ocr_text }}</textarea>
+                    
+                    <button type="submit" class="btn btn-save" id="saveBtn">💾 Save Correction</button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Error Detection Panel - Full Width Below -->
+        <div class="panel">
+            <h2>🔧 Detect Errors & Auto Fix</h2>
+            
+            <!-- PostOCR Buttons -->
+            <div class="postocr-buttons">
+                <button type="button" class="btn btn-detect" id="detectBtn">🔍 Detect Errors</button>
+                <button type="button" class="btn btn-fix" id="fixBtn">✨ Auto Fix</button>
+            </div>
+            
+            <!-- Results Display -->
+            <div id="resultsBox" class="results-box"></div>
+        </div>
+    </div>
+    
+    <script>
+        console.log('=== REVIEW PAGE LOADED ===');
+        
+        // Get elements
+        const detectBtn = document.getElementById('detectBtn');
+        const fixBtn = document.getElementById('fixBtn');
+        const textArea = document.getElementById('correctedText');
+        const resultsBox = document.getElementById('resultsBox');
+        const correctionForm = document.getElementById('correctionForm');
+        const saveBtn = document.getElementById('saveBtn');
+        
+        console.log('Elements:', {
+            detectBtn: !!detectBtn,
+            fixBtn: !!fixBtn,
+            textArea: !!textArea
+        });
+        
+        // DETECT ERRORS BUTTON
+        detectBtn.onclick = function() {
+            console.log('=== DETECT CLICKED ===');
+            const text = textArea.value.trim();
+            
+            if (!text) {
+                showNotification('Please enter text to check', 'warning', 'Input Required');
+                return;
+            }
+            
+            detectBtn.disabled = true;
+            detectBtn.textContent = '⏳ Checking...';
+            resultsBox.innerHTML = '<p>🔄 Checking for errors...</p>';
+            resultsBox.classList.add('show');
+            
+            fetch('/detect-errors', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text: text})
+            })
+            .then(r => r.json())
+            .then(data => {
+                console.log('Detect response:', data);
+                
+                if (data.errors && data.errors.length > 0) {
+                    let html = '<h4>Found ' + data.errors.length + ' errors:</h4>';
+                    let unknownCount = 0;
+                    
+                    // Separate errors with suggestions and without
+                    let errorsWithSuggestions = [];
+                    let unknownWords = [];
+                    
+                    data.errors.forEach((err, idx) => {
+                        if (err.suggestions && err.suggestions.length > 0) {
+                            errorsWithSuggestions.push({err, idx});
+                        } else {
+                            unknownWords.push({err, idx});
+                            unknownCount++;
+                        }
+                    });
+                    
+                    // Show errors with suggestions - only 2 initially
+                    html += '<div id="errorsContainer">';
+                    errorsWithSuggestions.forEach(({err, idx}, displayIdx) => {
+                        const escapedOriginalWord = err.word.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
+                        const displayClass = displayIdx < 2 ? 'show' : '';
+                        html += '<div class="error-item error-display ' + displayClass + '" data-error-index="' + displayIdx + '" style="border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 10px;">';
+                        html += '<strong>❌ "' + escapeHtml(err.word) + '"</strong>';
+                        html += '<br><small>Click suggestion to replace:</small>';
+                        html += '<div class="suggestion-badges" style="display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0;">';
+                        err.suggestions.slice(0, 5).forEach((suggestion, sIdx) => {
+                            // Extract word from tuple format: ['MEDIUM', 'word'] -> 'word'
+                            let suggestionText;
+                            if (Array.isArray(suggestion) && suggestion.length >= 2) {
+                                suggestionText = suggestion[1];
+                            } else if (typeof suggestion === 'string') {
+                                suggestionText = suggestion;
+                            } else {
+                                suggestionText = suggestion.word || suggestion.text || String(suggestion);
+                            }
+                            const escapedSuggestion = suggestionText.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
+                            html += '<button class="suggestion-badge" onclick="applySuggestion(\'' + escapedOriginalWord + '\', \'' + escapedSuggestion + '\')"><strong>' + escapeHtml(suggestionText) + '</strong></button>';
+                        });
+                        html += '</div>';
+                        html += '<div style="margin-top: 10px; padding: 10px; background: #f0f8ff; border: 1px dashed #4CAF50; border-radius: 4px;">';
+                        html += '<div style="font-size: 0.9em; margin-bottom: 6px; color: #555;">💡 Correct word not listed? Add it to dictionary:</div>';
+                        html += '<div style="display: flex; gap: 8px;">';
+                        html += '<input type="text" placeholder="Enter correct word..." id="custom-word-' + idx + '" style="flex: 1; padding: 8px; border: 1px solid #4CAF50; border-radius: 4px;">';
+                        html += '<button class="btn-apply" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;" onclick="addCustomCorrection(\'' + escapedOriginalWord + '\', \'custom-word-' + idx + '\')">✓ Add</button>';
+                        html += '</div>';
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                    
+                    // Load more button for errors
+                    if (errorsWithSuggestions.length > 2) {
+                        html += '<button id="loadMoreErrors" class="btn-load-more-errors" onclick="loadMoreErrors()">';
+                        html += '📥 Load More Errors (' + (errorsWithSuggestions.length - 2) + ' more)';
+                        html += '</button>';
+                    }
+                    
+                    // Show unknown words in collapsible section
+                    if (unknownWords.length > 0) {
+                        html += '<div style="margin-top: 15px; border: 2px solid #ff9800; border-radius: 8px; overflow: hidden;">';
+                        html += '<button onclick="toggleUnknownWords()" style="width: 100%; padding: 12px; background: #fff3cd; color: #856404; border: none; text-align: left; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">';
+                        html += '<span>📚 ' + unknownCount + ' word' + (unknownCount > 1 ? 's' : '') + ' not in dictionary</span>';
+                        html += '<span id="toggle-arrow" style="font-size: 1.2rem; transition: transform 0.3s;">▼</span>';
+                        html += '</button>';
+                        html += '<div id="unknown-words-section" style="display: none; padding: 15px; background: #fffbf0;">';
+                        unknownWords.forEach(({err, idx}) => {
+                            html += '<div class="error-item">';
+                            html += '<strong>⚠️ "' + escapeHtml(err.word) + '"</strong><br>';
+                            html += '<small>This word is not in our dictionary. Provide the correct word:</small>';
+                            html += '<div style="margin-top: 8px; display: flex; gap: 8px;">';
+                            html += '<input type="text" placeholder="Correct word..." id="dict-input-' + idx + '" style="flex: 1; padding: 6px; border: 1px solid #ff9800; border-radius: 4px;">';
+                            html += '<button class="btn-apply" onclick="addToDictionary(\'' + err.word.replace(/'/g, "\\'") + '\', \'dict-input-' + idx + '\')">Add</button>';
+                            html += '</div>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                        html += '</div>';
+                    }
+                    
+                    resultsBox.innerHTML = html;
+                } else {
+                    resultsBox.innerHTML = '<div class="success-msg">✅ No errors detected!</div>';
+                }
+                
+                detectBtn.disabled = false;
+                detectBtn.textContent = '🔍 Detect Errors';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resultsBox.innerHTML = '<p style="color: red;">❌ Error: ' + error.message + '</p>';
+                detectBtn.disabled = false;
+                detectBtn.textContent = '🔍 Detect Errors';
+            });
+        };
+        
+        // AUTO FIX BUTTON
+        fixBtn.onclick = function() {
+            console.log('=== FIX CLICKED ===');
+            const text = textArea.value.trim();
+            
+            if (!text) {
+                showNotification('Please enter text to fix', 'warning', 'Input Required');
+                return;
+            }
+            
+            fixBtn.disabled = true;
+            fixBtn.textContent = '⏳ Fixing...';
+            resultsBox.innerHTML = '<p>🔄 Auto-correcting...</p>';
+            resultsBox.classList.add('show');
+            
+            fetch('/correct', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    text: text,
+                    doc_id: '{{ doc_id }}',
+                    confidence_threshold: 'MEDIUM'
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                console.log('Fix response:', data);
+                
+                if (data.corrected_text) {
+                    let html = '<h4>✨ Corrected Text:</h4>';
+                    html += '<div class="corrected-preview">' + escapeHtml(data.corrected_text) + '</div>';
+                    html += '<button class="btn-apply" onclick="applyFix(\'' + escapeHtml(data.corrected_text).replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\')">✅ Apply Fix</button>';
+                    
+                    if (data.corrections && data.corrections.length > 0) {
+                        html += '<h4 style="margin-top: 15px;">Changes (' + data.corrections.length + '):</h4>';
+                        data.corrections.forEach(c => {
+                            html += '<div style="padding: 8px; background: #fff3cd; margin: 5px 0; border-radius: 4px;">';
+                            html += '"' + escapeHtml(c.original) + '" → "' + escapeHtml(c.corrected) + '"';
+                            html += '</div>';
+                        });
+                    }
+                    
+                    resultsBox.innerHTML = html;
+                } else {
+                    resultsBox.innerHTML = '<div class="success-msg">✅ No corrections needed!</div>';
+                }
+                
+                fixBtn.disabled = false;
+                fixBtn.textContent = '✨ Auto Fix';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resultsBox.innerHTML = '<p style="color: red;">❌ Error: ' + error.message + '</p>';
+                fixBtn.disabled = false;
+                fixBtn.textContent = '✨ Auto Fix';
+            });
+        };
+        
+        // APPLY FIX FUNCTION
+        function applyFix(text) {
+            console.log('Applying fix');
+            textArea.value = text;
+            resultsBox.classList.remove('show');
+            showNotification('Fix applied! Review and save.', 'success', 'Success');
+        }
+        
+        // APPLY SUGGESTION - Replace word with suggestion
+        function applySuggestion(incorrectWord, correctWord) {
+            console.log('Applying suggestion: "' + incorrectWord + '" -> "' + correctWord + '"');
+            let currentText = textArea.value;
+            
+            // Escape special regex characters
+            const escapedWord = incorrectWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            
+            // Use Unicode-aware word boundaries for Devanagari
+            // Match word that's either at start/end or surrounded by whitespace/punctuation
+            const regex = new RegExp('(^|[\\s\\u0964\\u0965])' + escapedWord + '(?=[\\s\\u0964\\u0965]|$)', 'giu');
+            
+            // Count matches
+            const matches = currentText.match(regex);
+            const replaceCount = matches ? matches.length : 0;
+            
+            // Replace all occurrences (keeping the leading whitespace/punctuation)
+            currentText = currentText.replace(regex, '$1' + correctWord);
+            
+            // Update textarea
+            textArea.value = currentText;
+            textArea.focus();
+            
+            // Visual feedback
+            console.log('✅ Replaced ' + replaceCount + ' occurrence(s)');
+            showNotification('Replaced "' + incorrectWord + '" → "' + correctWord + '" (' + replaceCount + ' time' + (replaceCount !== 1 ? 's' : '') + ')', 'success', 'Replacement Complete');
+            
+            // Re-run detect to update suggestions list
+            setTimeout(() => {
+                detectBtn.click();
+            }, 500);
+        }
+        
+        // LOAD MORE ERRORS FUNCTION
+        function loadMoreErrors() {
+            const errorItems = document.querySelectorAll('.error-display');
+            const loadMoreBtn = document.getElementById('loadMoreErrors');
+            
+            let visibleCount = 0;
+            for (let item of errorItems) {
+                if (item.classList.contains('show')) {
+                    visibleCount++;
+                }
+            }
+            
+            // Show next 2 errors
+            let showed = 0;
+            for (let i = visibleCount; i < errorItems.length && showed < 2; i++) {
+                errorItems[i].classList.add('show');
+                showed++;
+            }
+            
+            // Hide load more button if all errors are shown
+            if (visibleCount + 2 >= errorItems.length) {
+                loadMoreBtn.style.display = 'none';
+            } else {
+                const remaining = errorItems.length - (visibleCount + 2);
+                loadMoreBtn.textContent = `📥 Load More Errors (${remaining} more)`;
+            }
+        }
+
+        function addCustomCorrection(originalWord, inputId) {
+            const inputField = document.getElementById(inputId);
+            const correctedWord = inputField.value.trim();
+            
+            if (!correctedWord) {
+                showNotification('Please enter a correct word', 'warning', 'Input Required');
+                inputField.focus();
+                return;
+            }
+            
+            console.log('💾 Adding custom correction: "' + originalWord + '" -> "' + correctedWord + '"');
+            
+            // Apply the correction to text
+            applySuggestion(originalWord, correctedWord);
+            
+            // Save to dictionary
+            fetch('/add-to-dictionary', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    original_word: originalWord,
+                    corrected_word: correctedWord
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('✅ Added to dictionary:', data.message);
+                    showNotification('✅ ' + data.message, 'success');
+                    inputField.value = ''; // Clear input
+                } else {
+                    console.error('❌ Failed to add to dictionary:', data.error);
+                    showNotification('❌ Failed: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error:', error);
+                showNotification('❌ Error saving to dictionary', 'error');
+            });
+        }
+
+        function showNotification(message, type = 'info', title = null) {
+            const container = document.getElementById('notificationContainer');
+            if (!container) return;
+            
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            
+            // Icon mapping
+            const icons = {
+                success: '✅',
+                error: '❌',
+                warning: '⚠️',
+                info: 'ℹ️'
+            };
+            
+            notification.innerHTML = `
+                <div class="notification-icon">${icons[type] || icons.info}</div>
+                <div class="notification-content">
+                    ${title ? `<div class="notification-title">${title}</div>` : ''}
+                    <div class="notification-message">${message}</div>
+                </div>
+                <div class="notification-close" onclick="this.parentElement.remove()">×</div>
+            `;
+            
+            container.appendChild(notification);
+            
+            // Auto-remove after 3 seconds
+            setTimeout(() => {
+                notification.style.animation = 'fadeOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        function applySuggestionWithOption(incorrectWord, correctWord, errorIdx) {
+            console.log('Applying suggestion with dictionary option: "' + incorrectWord + '" -> "' + correctWord + '"');
+            applySuggestion(incorrectWord, correctWord);
+            
+            // Check if save-to-dictionary checkbox is checked
+            const checkbox = document.getElementById('save-custom-' + errorIdx);
+            if (checkbox && checkbox.checked) {
+                // Save to dictionary
+                saveToDictionary(incorrectWord, correctWord);
+                checkbox.checked = false; // Reset checkbox
+            }
+        }
+
+        function saveToDictionary(originalWord, correctedWord) {
+            console.log('💾 Saving to dictionary: "' + originalWord + '" -> "' + correctedWord + '"');
+            
+            fetch('/add-to-dictionary', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    original_word: originalWord,
+                    corrected_word: correctedWord
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('✅ Added to dictionary:', data.message);
+                    // Optional: show toast notification
+                    showNotification('✅ ' + data.message, 'success');
+                } else {
+                    console.error('❌ Failed to add to dictionary:', data.error);
+                    showNotification('❌ Failed: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error:', error);
+                showNotification('❌ Error saving to dictionary', 'error');
+            });
+        }
+        
+        
+        // TOGGLE UNKNOWN WORDS DROPDOWN
+        function toggleUnknownWords() {
+            const section = document.getElementById('unknown-words-section');
+            const arrow = document.getElementById('toggle-arrow');
+            
+            if (section.style.display === 'none' || section.style.display === '') {
+                section.style.display = 'block';
+                arrow.style.transform = 'rotate(180deg)';
+                console.log('📂 Showing unknown words');
+            } else {
+                section.style.display = 'none';
+                arrow.style.transform = 'rotate(0deg)';
+                console.log('📁 Hiding unknown words');
+            }
+        }
+        
+        // ADD TO DICTIONARY - Submit unknown word with correction
+        function addToDictionary(incorrectWord, inputId) {
+            const inputElement = document.getElementById(inputId);
+            const correctWord = inputElement.value.trim();
+            
+            if (!correctWord) {
+                showNotification('Please enter the correct word', 'warning', 'Input Required');
+                return;
+            }
+            
+            console.log('Adding to dictionary: "' + incorrectWord + '" -> "' + correctWord + '"');
+            
+            // Send to backend to add to dictionary
+            fetch('/add-to-dictionary', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    incorrect: incorrectWord,
+                    correct: correctWord
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Added to dictionary! Now fixing the word...', 'success', 'Dictionary Updated');
+                    // Now apply the correction to the text
+                    applySuggestion(incorrectWord, correctWord);
+                } else {
+                    showNotification('Failed to add: ' + (data.error || 'Unknown error'), 'error', 'Error');
+                }
+            })
+            .catch(error => {
+                showNotification('Error: ' + error.message, 'error', 'Error');
+            });
+        }
+        
+        // ESCAPE HTML HELPER
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // SAVE FORM HANDLER
+        correctionForm.onsubmit = async function(e) {
+            e.preventDefault();
+            console.log('=== SAVE CLICKED ===');
+            
+            const correctedText = textArea.value.trim();
+            
+            if (!correctedText) {
+                showNotification('Please enter corrected text', 'warning', 'Input Required');
+                return;
+            }
+            
+            saveBtn.disabled = true;
+            saveBtn.textContent = '💾 Saving...';
+            
+            try {
+                const response = await fetch('/review/{{ doc_id }}', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        corrected_text: correctedText,
+                        status: 'corrected'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showNotification(data.message || 'Saved successfully!', 'success', 'Success');
+                    
+                    // Update CER display if returned
+                    if (data.cer !== undefined && data.cer !== null) {
+                        const cerDisplay = document.getElementById('cerDisplay');
+                        const cerValue = document.getElementById('cerValue');
+                        const cerAccuracy = document.getElementById('cerAccuracy');
+                        
+                        // Show CER section
+                        cerDisplay.style.display = 'block';
+                        
+                        // Update value
+                        cerValue.textContent = data.cer.toFixed(4);
+                        
+                        // Update accuracy message
+                        let accuracyMsg = '';
+                        let accuracyColor = '#555';
+                        if (data.cer < 0.05) {
+                            accuracyMsg = 'Excellent accuracy! 🎯';
+                            accuracyColor = '#2e7d32';
+                        } else if (data.cer < 0.15) {
+                            accuracyMsg = 'Good accuracy ✅';
+                            accuracyColor = '#558b2f';
+                        } else if (data.cer < 0.30) {
+                            accuracyMsg = 'Moderate accuracy ⚠️';
+                            accuracyColor = '#f57c00';
+                        } else {
+                            accuracyMsg = 'Needs improvement 🔧';
+                            accuracyColor = '#d32f2f';
+                        }
+                        cerAccuracy.textContent = accuracyMsg;
+                        cerAccuracy.style.color = accuracyColor;
+                        cerAccuracy.style.fontWeight = '600';
+                        
+                        // Scroll to CER display
+                        cerDisplay.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                    
+                    // Update status in header if available
+                    if (data.version) {
+                        const headerP = document.querySelector('.header p');
+                        if (headerP) {
+                            headerP.textContent = 'Document ID: {{ doc_id }} | Status: corrected | Version: ' + data.version;
+                        }
+                    }
+                    
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '💾 Save Correction';
+                } else {
+                    showNotification('Failed: ' + (data.error || 'Unknown error'), 'error', 'Error');
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '💾 Save Correction';
+                }
+            } catch (error) {
+                showNotification('Error: ' + error.message, 'error', 'Error');
+                saveBtn.disabled = false;
+                saveBtn.textContent = '💾 Save Correction';
+            }
+        };
+        
+        console.log('=== ALL HANDLERS READY ===');
+    </script>
+    
+    <!-- Version History Timeline -->
+    {% if version_history and version_history|length > 0 %}
+    <div class="version-history">
+        <h2>🕒 Version History</h2>
+        <div class="version-timeline" id="versionTimeline">
+            {% set reversed_history = version_history|reverse|list %}
+            {% for vh in reversed_history %}
+            <div class="version-item {% if vh[0] == doc_id %}active{% endif %} version-item-display" data-version-index="{{ loop.index0 }}">
+                <div class="version-header">
+                    <div class="version-title">Version {{ vh[1] }}</div>
+                    <div class="version-date">{{ vh[4].strftime('%Y-%m-%d %H:%M') if vh[4] else 'N/A' }}</div>
+                </div>
+                <div class="version-meta">
+                    <span><span class="status-tag {% if vh[2] == 'ocr' %}status-ocr{% else %}status-corrected{% endif %}">{{ vh[2].upper() }}</span></span>
+                    {% if vh[3] is not none %}
+                    <span>CER: <span class="cer-badge">{{ "%.4f"|format(vh[3]) }}</span></span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% if version_history|length > 2 %}
+        <button id="loadMoreVersions" class="btn-load-more" onclick="loadMoreVersions()">
+            📥 Load More Versions ({{ version_history|length - 2 }} more)
+        </button>
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    <!-- Similar Documents Panel -->
+    {% if similar_docs and similar_docs|length > 0 %}
+    <div class="version-history" style="margin-top: 20px;">
+        <h2>🔍 Similar Documents (Reference Only)</h2>
+        <p style="color: #666; margin-bottom: 20px; font-size: 0.95rem;">
+            These documents have similar content. Use them as reference for corrections.
+        </p>
+        <div class="similar-docs-grid">
+            {% for doc in similar_docs %}
+            <div class="similar-doc-card">
+                <div class="similar-doc-header">
+                    <div class="similar-doc-title">📄 Doc #{{ doc.doc_id }}</div>
+                    <span class="similarity-score">{{ "%.2f"|format(doc.score * 100) }}%</span>
+                </div>
+                <div class="similar-doc-meta">
+                    <span>Version: {{ doc.version }}</span>
+                    <span>Status: {{ doc.status.upper() }}</span>
+                </div>
+                <div class="similar-doc-preview">
+                    {{ doc.text[:200] }}{% if doc.text|length > 200 %}...{% endif %}
+                </div>
+                <div class="similar-doc-actions">
+                    <button class="btn-copy-text" onclick="copyReferenceText(this)" data-text="{{ doc.full_text }}">📋 Copy Text</button>
+                    <a href="/review/{{ doc.doc_id }}" class="btn-view-doc">👁️ View</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</body>
+</html>
+
+<script>
+// Global function for load more versions
+window.loadMoreVersions = function() {
+    const versionItems = document.querySelectorAll('.version-item-display');
+    const loadMoreBtn = document.getElementById('loadMoreVersions');
+    
+    let visibleCount = 0;
+    for (let item of versionItems) {
+        if (item.classList.contains('show') || window.getComputedStyle(item).display !== 'none') {
+            visibleCount++;
+        }
+    }
+    
+    // Show next 2 versions
+    let showed = 0;
+    for (let i = visibleCount; i < versionItems.length && showed < 2; i++) {
+        versionItems[i].classList.add('show');
+        showed++;
+    }
+    
+    // Hide load more button if all versions are shown
+    if (visibleCount + 2 >= versionItems.length) {
+        loadMoreBtn.style.display = 'none';
+    } else {
+        const remaining = versionItems.length - (visibleCount + 2);
+        loadMoreBtn.textContent = `📥 Load More Versions (${remaining} more)`;
+    }
+};
+
+// Global function for copy reference text
+window.copyReferenceText = function(button) {
+    const text = button.getAttribute('data-text');
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    
+    const originalText = button.innerHTML;
+    button.innerHTML = '✅ Copied!';
+    setTimeout(function() {
+        button.innerHTML = originalText;
+    }, 2000);
+};
+</script>

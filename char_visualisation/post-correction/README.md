@@ -1,0 +1,5 @@
+- in the folder data/ we have train, test and validation csvs. 
+- the headers of the csv's are: input_text;target_text;path
+- input_text is the line-recognition model output, target_text is the ground truth annotated data.
+- both input_text and target_text are in transliterated format (IAST) as ByT5-Sanskrit has been pre-trained on transliterated Sanskrit (IAST).
+- path is points to the locations of the corresponding text-line images. This is required for visualization purposes.

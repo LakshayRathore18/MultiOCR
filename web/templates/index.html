@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Model OCR - Document Parser</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📄 Multi-Model OCR</h1>
+            <p>Advanced Document Text Extraction with PaddleOCR, EasyOCR, DeepSeek & Tesseract</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Split Layout -->
+            <div class="split-layout">
+                <!-- LEFT PANEL - Image Upload & Preview -->
+                <div class="left-panel">
+                    <div class="panel-header">
+                        <h2>📤 Upload Document</h2>
+                    </div>
+                    
+                    <!-- Upload Box -->
+                    <div class="upload-box" id="uploadBox">
+                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <p class="upload-text">Drop image here or click to upload</p>
+                        <p class="upload-hint">PNG, JPG, JPEG, GIF, BMP, TIFF (Max 16MB)</p>
+                        <input type="file" id="fileInput" accept="image/*" hidden>
+                    </div>
+
+                    <!-- Image Preview -->
+                    <div class="preview-section" id="previewSection" style="display: none;">
+                        <div class="image-container">
+                            <img id="previewImage" src="" alt="Preview">
+                        </div>
+                        
+                        <!-- Speed Mode Selector -->
+                        <div class="speed-mode-selector">
+                            <label class="mode-title">⚙️ Processing Mode</label>
+                            <div class="mode-options">
+                                <label class="mode-option">
+                                    <input type="radio" name="mode" value="paddleocr" checked>
+                                    <div class="mode-content">
+                                        <span class="mode-label">🚀 PaddleOCR</span>
+                                    </div>
+                                </label>
+                                <label class="mode-option">
+                                    <input type="radio" name="mode" value="easyocr">
+                                    <div class="mode-content">
+                                        <span class="mode-label">👁️ EasyOCR</span>
+                                    </div>
+                                </label>
+                                <label class="mode-option">
+                                    <input type="radio" name="mode" value="deepseek">
+                                    <div class="mode-content">
+                                        <span class="mode-label">🤖 DeepSeek</span>
+                                    </div>
+                                </label>
+                                <label class="mode-option">
+                                    <input type="radio" name="mode" value="multiocr">
+                                    <div class="mode-content">
+                                        <span class="mode-label">🎯 MultiOCR</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="preview-actions">
+                            <button class="btn btn-primary btn-block" id="parseBtn">
+                                <span class="btn-icon">🔍</span>
+                                Parse Document
+                            </button>
+                            <button class="btn btn-warning btn-block" id="reprocessBtn" style="display: none;">
+                                <span class="btn-icon">🔄</span>
+                                Re-run OCR
+                            </button>
+                            <button class="btn btn-secondary btn-block" id="clearBtn">
+                                <span class="btn-icon">🔄</span>
+                                Upload New Image
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT PANEL - Results -->
+                <div class="right-panel">
+                    <div class="panel-header">
+                        <h2>📊 OCR Results</h2>
+                    </div>
+                    
+                    <!-- Loading State -->
+                    <div class="loading" id="loading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>Processing document with OCR models...</p>
+                        <p class="loading-hint">Please wait while we extract text</p>
+                    </div>
+
+                    <!-- Placeholder -->
+                    <div class="results-placeholder" id="resultsPlaceholder">
+                        <div class="placeholder-icon">📄</div>
+                        <h3>No Results Yet</h3>
+                        <p>Upload an image and click "Parse Document" to see extracted text here</p>
+                    </div>
+
+                    <!-- Results Content -->
+                    <div class="results-content" id="resultsSection" style="display: none;">
+                        <!-- Visualization Section -->
+                        <div class="visualization-section" id="visualizationSection" style="display: none;">
+                            <div class="viz-header">
+                                <h3>🎨 Pre-OCR Visualization</h3>
+                                <span class="viz-status" id="vizStatus"></span>
+                            </div>
+                            <div class="viz-gallery" id="vizGallery">
+                                <div class="viz-item">
+                                    <h4>Character Bounding Boxes</h4>
+                                    <img id="vizBoundingBoxes" src="" alt="Bounding Boxes" class="viz-image">
+                                </div>
+                                <div class="viz-item">
+                                    <h4>CRAFT Heatmap</h4>
+                                    <img id="vizHeatmap" src="" alt="Heatmap" class="viz-image">
+                                </div>
+                                <div class="viz-item">
+                                    <h4>Line Segmentation</h4>
+                                    <img id="vizLineSegmentation" src="" alt="Line Segmentation" class="viz-image">
+                                </div>
+                                <div class="viz-item">
+                                    <h4>Combined Analysis</h4>
+                                    <img id="vizCombined" src="" alt="Combined Analysis" class="viz-image">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Visualization Loading -->
+                        <div class="visualization-loading" id="visualizationLoading" style="display: none;">
+                            <div class="small-spinner"></div>
+                            <p>🎨 Generating visualization...</p>
+                        </div>
+
+                        <!-- Extracted Text -->
+                        <div class="text-output">
+                            <div class="output-header">
+                                <h3>✨ Extracted Text</h3>
+                            </div>
+                            <div class="text-lines" id="textLines"></div>
+                        </div>
+
+                        <!-- Full Text Area -->
+                        <div class="full-text-area">
+                            <div class="textarea-header">
+                                <h3>📝 Complete Text</h3>
+                                <button class="btn btn-small" id="copyBtn">
+                                    <span class="btn-icon">📋</span>
+                                    Copy
+                                </button>
+                            </div>
+                            <textarea id="fullText" readonly></textarea>
+                        </div>
+
+                        <!-- Benchmark Stats -->
+                        <div class="benchmark-section">
+                            <h3>📈 Performance Metrics</h3>
+                            <div class="benchmark-stats" id="benchmarkStats"></div>
+                        </div>
+
+                        <!-- Devanagari Quality (if present) -->
+                        <div class="devanagari-quality" id="devanagariQuality" style="display: none;">
+                            <h3>🔤 Devanagari Quality</h3>
+                            <div id="devanagariMetrics"></div>
+                        </div>
+                    </div>
+
+                    <!-- Error Message -->
+                    <div class="error-message" id="errorMessage" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

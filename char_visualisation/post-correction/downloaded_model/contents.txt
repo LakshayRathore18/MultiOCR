@@ -1,0 +1,3 @@
+downlaod models:
+models--byt5-sanskrit
+sanskrit-multitask
