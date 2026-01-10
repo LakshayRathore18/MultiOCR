@@ -52,6 +52,20 @@ It combines multiple OCR engines, applies a voting strategy, and tracks accuracy
 
 ## 📦 Installation
 
+### 0. Prerequisites - Install Ollama & DeepSeek OCR
+
+**Install Ollama:**
+
+1. Download Ollama from [https://ollama.ai](https://ollama.ai)
+2. Install and start Ollama
+3. Pull DeepSeek OCR model:
+
+```bash
+ollama pull deepseek-ocr
+```
+
+✅ Verify installation: `ollama list` should show `deepseek-ocr`
+
 ### 1. Clone & Setup Environment
 
 ```bash
@@ -80,14 +94,14 @@ copy .env.example .env
 Edit `.env` - **Only change these two lines:**
 
 ```env
-DB_NAME=multiocrdb
+DB_NAME=your_database_name
 DB_PASSWORD=your_postgres_password
 ```
 
 ### 4. Setup Database
 
 ```bash
-python setup_database.py
+python src/database/setup_database.py
 ```
 
 ✅ **Done!** Your database is ready with all tables and indexes.
@@ -183,6 +197,8 @@ multiocr/
 
 ## 🚀 Quick Start
 
+**Prerequisite:** Install [Ollama](https://ollama.ai) and run `ollama pull deepseek-ocr`
+
 ```bash
 # 1. Setup
 python -m venv .venv
@@ -191,10 +207,10 @@ pip install -r requirements.txt
 
 # 2. Configure
 copy .env.example .env
-# Edit .env: Set DB_PASSWORD=your_password
+# Edit .env: Set DB_PASSWORD and DB_NAME
 
 # 3. Initialize
-python setup_database.py
+python src/database/setup_database.py
 
 # 4. Run
 python web/app.py
@@ -202,40 +218,7 @@ python web/app.py
 
 → Open [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
----
 
-## 📚 Documentation
 
-- [SETUP.md](SETUP.md) - Detailed setup guide with troubleshooting
-- [docs/QUICKSTART.md](docs/QUICKSTART.md) - Fast-track guide
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design details
-- [docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md) - Model training instructions
-
----
-
-## 📊 Status
-
-- ✅ **Actively developed** - Regular updates and improvements
-- 🔬 **Research & production** - Used in both research workflows and production pipelines
-- 🔧 **Extensible** - Easy to add new OCR engines or post-processors
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Please ensure:
-- Code follows existing patterns
-- Tests pass
-- Documentation updated
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
----
-
-**Note**: See [SETUP.md](SETUP.md) for comprehensive setup instructions including troubleshooting, verification steps, and detailed configuration options.
 
 
