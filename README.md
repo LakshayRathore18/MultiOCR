@@ -6,41 +6,13 @@ Complete setup instructions for the Multi-Model OCR system with human-in-the-loo
 
 ## 📋 Table of Contents
 
-- [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Database Setup](#database-setup)
 - [Environment Configuration](#environment-configuration)
 - [Running the Application](#running-the-application)
 - [Usage Guide](#usage-guide)
 - [Architecture Overview](#architecture-overview)
-- [Troubleshooting](#troubleshooting)
 - [Project Structure](#project-structure)
-
----
-
-## 🔧 Prerequisites
-
-### Required Software
-
-- **Python 3.8+** ([Download](https://www.python.org/downloads/))
-- **PostgreSQL 12+** ([Download](https://www.postgresql.org/download/))
-- **Git** (for cloning - optional)
-
-### Hardware Requirements
-
-- **RAM**: Minimum 8GB (16GB recommended for GPU usage)
-- **Storage**: 5GB free space (for models and data)
-- **GPU**: Optional - NVIDIA GPU with CUDA support for faster processing
-
-### System-Specific Notes
-
-**Windows:**
-- Ensure PostgreSQL is added to PATH or note the installation directory
-- Visual C++ Redistributable may be needed for some Python packages
-
-**Linux/Mac:**
-- Install PostgreSQL via package manager (`apt`, `brew`, etc.)
-- Ensure Python development headers are installed
 
 ---
 
