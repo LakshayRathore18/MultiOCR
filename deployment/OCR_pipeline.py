@@ -3,7 +3,6 @@ from ocr.easy_ocr import run_easyocr
 from ocr.deepseek_ocr import run_deepseek
 from ocr.voting import ocr_voting
 from ocr.benchmark import benchmark_ocr
-from ocr.tesseract_ocr import run_tesseract
 
 IMAGE_PATH = "ocr_env/images/manu2.jpg"
 
@@ -32,20 +31,16 @@ final_output = ocr_voting(
     deepseek_results=deepseek_data["results"]
 )
 
-# Fallback to Tesseract if final OCR is empty
-if not final_output:
-    print("\n⚠️ Primary OCR failed. Falling back to Tesseract...")
-    final_output = run_tesseract(IMAGE_PATH)
-
 print("\nOCR BENCHMARK SUMMARY")
 print("=" * 50)
 print(f"PaddleOCR → Time: {paddle_data['time_sec']}s | "
       f"Lines: {paddle_data['lines']} | "
       f"Avg Conf: {paddle_data['avg_confidence']}")
 
-print(f"EasyOCR   → Time: {easy_data['time_sec']}s | "
-      f"Lines: {easy_data['lines']} | "
-      f"Avg Conf: {easy_data['avg_confidence']}")
+# EasyOCR disabled
+# print(f"EasyOCR   → Time: {easy_data['time_sec']}s | "
+#       f"Lines: {easy_data['lines']} | "
+#       f"Avg Conf: {easy_data['avg_confidence']}")
 
 print(f"DeepSeek  → Time: {deepseek_data['time_sec']}s | "
       f"Lines: {deepseek_data['lines']} | "

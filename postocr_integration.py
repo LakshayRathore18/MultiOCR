@@ -7,11 +7,11 @@ import os
 import sys
 from pathlib import Path
 
-# Add postOCR to path
-postocr_path = os.path.join(os.path.dirname(__file__), 'postOCR')
-sys.path.insert(0, postocr_path)
+# Add correction to path
+correction_path = os.path.join(os.path.dirname(__file__), 'correction')
+sys.path.insert(0, correction_path)
 
-from postOCR.src.core.corrector import OCRCorrector
+from correction.src.core.corrector import OCRCorrector
 
 # Global corrector instance
 _corrector = None
@@ -27,7 +27,7 @@ def get_corrector():
 def _initialize_corrector():
     """Initialize corrector with data files and build trie"""
     corrector = _corrector
-    base_dir = Path(__file__).parent / "postOCR"
+    base_dir = Path(__file__).parent / "correction"
     
     print("\n" + "="*60)
     print("📖 PostOCR Correction Module Initialization")
@@ -157,7 +157,7 @@ def add_confusion_pair(incorrect, correct):
         corrector.suggestion_cache.clear()
         
         # Persist the changes to disk
-        base_dir = Path(__file__).parent / "postOCR"
+        base_dir = Path(__file__).parent / "correction"
         
         # Save updated domain words
         learned_domain_path = base_dir / "data" / "learned_domain_words.txt"

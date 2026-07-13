@@ -9,7 +9,7 @@ import os
 # Add parent directory to path to import db module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.database.db import get_db
+from database.db import get_db
 
 
 def export_training_data(output_file='train.json'):

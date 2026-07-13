@@ -4,7 +4,7 @@ Find similar documents based on word-level similarity
 """
 import numpy as np
 import re
-from src.database.db import get_db
+from database.db import get_db
 
 def cosine_similarity(a: list, b: list) -> float:
     """

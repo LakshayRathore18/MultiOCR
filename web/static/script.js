@@ -59,19 +59,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (sessionData.ocr_results) {
                 console.log('📊 Restoring OCR results...');
                 displayOCRResults(sessionData.ocr_results);
-                
-                // Restore visualization if available
-                if (sessionData.visualization_path) {
-                    console.log('📸 Restoring visualization...');
-                    const vizDiv = document.querySelector('[id*="visualization"]');
-                    if (vizDiv) {
-                        vizDiv.innerHTML = `
-                            <div class="visualization-container">
-                                <img src="${sessionData.visualization_path}" alt="Bounding Boxes" style="max-width: 100%; border-radius: 8px;">
-                            </div>
-                        `;
-                    }
-                }
             }
         }
     } catch (error) {
@@ -88,6 +75,13 @@ if (correctTextBtn) {
 }
 if (acceptCorrectionBtn) {
     acceptCorrectionBtn.addEventListener('click', acceptAndSaveCorrection);
+}
+
+// Prevent errors from missing correction elements
+if (!correctionSection || !detectErrorsBtn || !correctTextBtn || !errorDetection || 
+    !errorsList || !correctionResults || !correctedText || !acceptCorrectionBtn || 
+    !correctionLoading || !errorCount) {
+    console.log('⚠️ Correction section elements not found - correction features disabled');
 }
 
 // Upload box click
@@ -194,10 +188,9 @@ parseBtn.addEventListener('click', async () => {
     resultsPlaceholder.style.display = 'none';
     
     try {
-        // Start both OCR and visualization in parallel
-        console.log('🚀 Starting OCR and visualization for:', currentFilePath);
+        console.log('🚀 Starting OCR for:', currentFilePath);
         
-        const ocrPromise = fetch('/process', {
+        const ocrResponse = await fetch('/process', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -210,32 +203,7 @@ parseBtn.addEventListener('click', async () => {
             })
         });
         
-        const vizPromise = fetch('/visualize', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                filepath: currentFilePath
-            })
-        });
-        
-        const [ocrResponse, vizResponse] = await Promise.all([ocrPromise, vizPromise]);
-        
         const ocrData = await ocrResponse.json();
-        
-        // Handle visualization response
-        let vizData = null;
-        try {
-            if (vizResponse.ok) {
-                vizData = await vizResponse.json();
-                console.log('🎨 Visualization Data:', vizData);
-            } else {
-                console.error('❌ Visualization request failed with status:', vizResponse.status);
-            }
-        } catch (vizError) {
-            console.error('❌ Failed to parse visualization response:', vizError);
-        }
         
         loading.style.display = 'none';
         
@@ -247,7 +215,7 @@ parseBtn.addEventListener('click', async () => {
                 showInfo(ocrData.message);
             }
             
-            displayResults(ocrData, vizData);
+            displayResults(ocrData);
         } else {
             resultsPlaceholder.style.display = 'block';
             showError(ocrData.error);
@@ -280,10 +248,9 @@ if (reprocessBtn) {
         resultsPlaceholder.style.display = 'none';
         
         try {
-            console.log('🔄 Reprocessing OCR and visualizing for:', currentFilePath);
+            console.log('🔄 Reprocessing OCR for:', currentFilePath);
             
-            // Call both OCR and visualization in parallel
-            const ocrPromise = fetch('/process', {
+            const ocrResponse = await fetch('/process', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -296,36 +263,14 @@ if (reprocessBtn) {
                 })
             });
             
-            const vizPromise = fetch('/visualize', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    filepath: currentFilePath
-                })
-            });
-            
-            const [ocrResponse, vizResponse] = await Promise.all([ocrPromise, vizPromise]);
-            
             const ocrData = await ocrResponse.json();
-            
-            // Handle visualization response
-            let vizData = null;
-            try {
-                if (vizResponse.ok) {
-                    vizData = await vizResponse.json();
-                }
-            } catch (e) {
-                console.error('Visualization failed:', e);
-            }
             
             loading.style.display = 'none';
             
             if (ocrData.success) {
                 resultsPlaceholder.style.display = 'none';
                 showInfo(`✅ OCR reprocessed! New version ${ocrData.version || ''} created.`);
-                displayResults(ocrData, vizData);
+                displayResults(ocrData);
             } else {
                 resultsPlaceholder.style.display = 'block';
                 showError(ocrData.error);
@@ -339,10 +284,9 @@ if (reprocessBtn) {
 }
 
 // Display results
-function displayResults(data, vizData) {
+function displayResults(data) {
     console.log('🎬 displayResults called');
     console.log('OCR Data:', data);
-    console.log('Visualization Data:', vizData);
     
     // Remove any previous version info boxes
     const oldVersionInfo = document.querySelector('.version-info-box');
@@ -356,60 +300,6 @@ function displayResults(data, vizData) {
         oldReviewBtn.remove();
     }
 
-    // Display Visualization Section
-    const visualizationSection = document.getElementById('visualizationSection');
-    console.log('Visualization section element:', visualizationSection);
-    
-    if (vizData && vizData.success) {
-        console.log('✅ Visualization data is valid, displaying...');
-        console.log('Images object:', vizData.images);
-        
-        // Stop any polling that might be running
-        if (visualizationPollInterval) {
-            console.log('⏹️ Stopping visualization polling');
-            clearInterval(visualizationPollInterval);
-            visualizationPollInterval = null;
-        }
-        
-        // Update visualization images
-        const vizBoundingBoxes = document.getElementById('vizBoundingBoxes');
-        const vizHeatmap = document.getElementById('vizHeatmap');
-        const vizLineSegmentation = document.getElementById('vizLineSegmentation');
-        const vizCombined = document.getElementById('vizCombined');
-        
-        console.log('Element vizBoundingBoxes:', vizBoundingBoxes);
-        console.log('Element vizHeatmap:', vizHeatmap);
-        console.log('Element vizLineSegmentation:', vizLineSegmentation);
-        console.log('Element vizCombined:', vizCombined);
-        
-        if (vizBoundingBoxes && vizData.images && vizData.images.bounding_boxes) {
-            console.log('Setting vizBoundingBoxes.src to:', vizData.images.bounding_boxes);
-            vizBoundingBoxes.src = vizData.images.bounding_boxes;
-        }
-        if (vizHeatmap && vizData.images && vizData.images.heatmap) {
-            console.log('Setting vizHeatmap.src to:', vizData.images.heatmap);
-            vizHeatmap.src = vizData.images.heatmap;
-        }
-        if (vizLineSegmentation && vizData.images && vizData.images.line_segmentation) {
-            console.log('Setting vizLineSegmentation.src to:', vizData.images.line_segmentation);
-            vizLineSegmentation.src = vizData.images.line_segmentation;
-        }
-        if (vizCombined && vizData.images && vizData.images.combined_analysis) {
-            console.log('Setting vizCombined.src to:', vizData.images.combined_analysis);
-            vizCombined.src = vizData.images.combined_analysis;
-        }
-        
-        console.log('Setting visualization section to display: block');
-        visualizationSection.style.display = 'block';
-    } else {
-        if (vizData && vizData.error) {
-            console.warn('⚠️  Visualization failed:', vizData.error);
-        } else {
-            console.warn('⚠️  Visualization data missing or invalid');
-        }
-        visualizationSection.style.display = 'none';
-    }
-    
     // Benchmark stats - adjust based on mode
     let statsHTML = '';
     
@@ -421,72 +311,12 @@ function displayResults(data, vizData) {
                 <div class="stat-value">v${data.version || 'N/A'}</div>
                 <div class="stat-details">
                     ${data.status === 'corrected' ? 'Human-verified text' : 'Previous OCR result'}<br>
-                    No reprocessing needed
-                </div>
-            </div>
-            <div class="stat-card">
-                <h4>✨ Text Lines</h4>
-                <div class="stat-value">${data.text ? data.text.length : 0}</div>
-                <div class="stat-details">
-                    ${data.status === 'corrected' ? 'Corrected by scholar' : 'OCR extracted'}<br>
-                    Click "Re-run OCR" to reprocess
-                </div>
-            </div>
-        `;
-    } else if (data.mode === 'paddleocr' && data.benchmark) {
-        statsHTML = `
-            <div class="stat-card">
-                <h4>🚀 PaddleOCR</h4>
-                <div class="stat-details">
-                    ${data.benchmark.paddleocr.lines} lines detected<br>
-                    Avg Confidence: ${(data.benchmark.paddleocr.avg_confidence * 100).toFixed(1)}%
-                </div>
-            </div>
-            <div class="stat-card">
-                <h4>✨ Final Output</h4>
-                <div class="stat-details">
-                    ${data.text.length} Unique lines extracted<br>
-                    PaddleOCR only
-                </div>
-            </div>
-        `;
-    } else if (data.mode === 'easyocr' && data.benchmark) {
-        statsHTML = `
-            <div class="stat-card">
-                <h4>👁️ EasyOCR</h4>
-                <div class="stat-details">
-                    ${data.benchmark.easyocr.lines} lines detected<br>
-                    Avg Confidence: ${(data.benchmark.easyocr.avg_confidence * 100).toFixed(1)}%
-                </div>
-            </div>
-            <div class="stat-card">
-                <h4>✨ Final Output</h4>
-                <div class="stat-details">
-                    ${data.text.length} Unique lines extracted<br>
-                    EasyOCR only
-                </div>
-            </div>
-        `;
-    } else if (data.mode === 'deepseek' && data.benchmark) {
-        statsHTML = `
-            <div class="stat-card">
-                <h4>🤖 DeepSeek</h4>
-                <div class="stat-details">
-                    ${data.benchmark.deepseek.lines} lines detected<br>
-                    Avg Confidence: ${(data.benchmark.deepseek.avg_confidence * 100).toFixed(1)}%
-                </div>
-            </div>
-            <div class="stat-card">
-                <h4>✨ Final Output</h4>
-                <div class="stat-details">
-                    ${data.text.length} Unique lines extracted<br>
-                    AI Vision OCR
                 </div>
             </div>
         `;
     } else if (data.benchmark) {
-        // MultiOCR mode with multiple engines
-        let engines = [];
+        // Show benchmark stats for each engine
+        const engines = [];
         
         if (data.benchmark.paddleocr) {
             engines.push(`
@@ -802,112 +632,15 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
-// Visualization Polling System
-let visualizationPollInterval = null;
-
-function startVisualizationPolling(imageHash) {
-    // Stop any existing polling
-    if (visualizationPollInterval) {
-        clearInterval(visualizationPollInterval);
-    }
-    
-    // Show loading indicator
-    const vizLoading = document.getElementById('visualizationLoading');
-    const vizSection = document.getElementById('visualizationSection');
-    if (vizLoading) vizLoading.style.display = 'flex';
-    if (vizSection) vizSection.style.display = 'none';
-    
-    // Start polling every 1 second
-    visualizationPollInterval = setInterval(() => {
-        checkVisualizationStatus(imageHash);
-    }, 1000);
-}
-
-async function checkVisualizationStatus(imageHash) {
-    try {
-        const response = await fetch(`/visualization-status/${imageHash}`);
-        const data = await response.json();
-        
-        if (data.success && data.ready) {
-            // Visualization is ready - display it
-            displayVisualization(data.images);
-            
-            // Stop polling
-            if (visualizationPollInterval) {
-                clearInterval(visualizationPollInterval);
-                visualizationPollInterval = null;
-            }
-        }
-    } catch (error) {
-        console.error('Error checking visualization status:', error);
-    }
-}
-
-function displayVisualization(images) {
-    const vizLoading = document.getElementById('visualizationLoading');
-    const vizSection = document.getElementById('visualizationSection');
-    
-    if (vizLoading) vizLoading.style.display = 'none';
-    if (vizSection) vizSection.style.display = 'block';
-    
-    // Set image sources
-    const bbImg = document.getElementById('vizBoundingBoxes');
-    const heatmapImg = document.getElementById('vizHeatmap');
-    const lineSegImg = document.getElementById('vizLineSegmentation');
-    const combinedImg = document.getElementById('vizCombined');
-    
-    if (bbImg && images.bounding_boxes) {
-        bbImg.src = '/' + images.bounding_boxes;
-    }
-    if (heatmapImg && images.heatmap) {
-        heatmapImg.src = '/' + images.heatmap;
-    }
-    if (lineSegImg && images.line_segmentation) {
-        lineSegImg.src = '/' + images.line_segmentation;
-    }
-    if (combinedImg && images.combined_analysis) {
-        combinedImg.src = '/' + images.combined_analysis;
-    }
-    
-    // Add click to enlarge functionality
-    document.querySelectorAll('.viz-image').forEach(img => {
-        img.addEventListener('click', function() {
-            openImageModal(this.src, this.alt);
-        });
-    });
-}
-
-function openImageModal(imageSrc, imageAlt) {
-    // Create modal
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0,0,0,0.8);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-        cursor: pointer;
-    `;
-    
-    const img = document.createElement('img');
-    img.src = imageSrc;
-    img.alt = imageAlt;
-    img.style.cssText = 'max-width: 90vw; max-height: 90vh; border-radius: 8px;';
-    
-    modal.appendChild(img);
-    modal.addEventListener('click', () => modal.remove());
-    
-    document.body.appendChild(modal);
-}
 
 // ============ TEXT CORRECTION FUNCTIONS ============
 
 async function detectOCRErrors() {
+    if (!correctionLoading || !errorDetection) {
+        console.error('Correction elements not available');
+        return;
+    }
+    
     const text = fullText.value;
     
     if (!text.trim()) {
@@ -938,11 +671,18 @@ async function detectOCRErrors() {
         console.error('❌ Error detection error:', error);
         showError('Failed to detect errors: ' + error.message);
     } finally {
-        correctionLoading.style.display = 'none';
+        if (correctionLoading) {
+            correctionLoading.style.display = 'none';
+        }
     }
 }
 
 async function performOCRCorrection() {
+    if (!correctionLoading || !correctionResults || !errorDetection) {
+        console.error('Correction elements not available');
+        return;
+    }
+    
     const text = fullText.value;
     
     if (!text.trim()) {
@@ -978,11 +718,18 @@ async function performOCRCorrection() {
         console.error('❌ Correction error:', error);
         showError('Failed to correct text: ' + error.message);
     } finally {
-        correctionLoading.style.display = 'none';
+        if (correctionLoading) {
+            correctionLoading.style.display = 'none';
+        }
     }
 }
 
 function displayErrorDetection(result) {
+    if (!errorsList) {
+        console.error('errorsList element not available');
+        return;
+    }
+    
     console.log('📋 Error detection result:', result);
     
     if (!result.errors || result.errors.length === 0) {
@@ -1003,10 +750,17 @@ function displayErrorDetection(result) {
         }).join('');
     }
     
-    errorDetection.style.display = 'block';
+    if (errorDetection) {
+        errorDetection.style.display = 'block';
+    }
 }
 
 function displayCorrectionResults(result) {
+    if (!correctedText || !errorCount || !correctionResults) {
+        console.error('Correction result elements not available');
+        return;
+    }
+    
     console.log('✏️ Correction result:', result);
     
     if (result.success && result.corrected_text) {
@@ -1031,8 +785,12 @@ function acceptAndSaveCorrection() {
     fullText.value = correctedTextValue;
     
     // Hide correction section
-    correctionResults.style.display = 'none';
-    errorDetection.style.display = 'none';
+    if (correctionResults) {
+        correctionResults.style.display = 'none';
+    }
+    if (errorDetection) {
+        errorDetection.style.display = 'none';
+    }
     
     // Show success message
     const successMsg = document.createElement('div');
@@ -1047,7 +805,12 @@ function acceptAndSaveCorrection() {
     `;
     successMsg.textContent = '✓ Text correction applied successfully!';
     
-    correctionSection.insertAdjacentElement('afterend', successMsg);
+    if (correctionSection) {
+        correctionSection.insertAdjacentElement('afterend', successMsg);
+    } else {
+        // If correction section doesn't exist, append to preview section
+        previewSection.insertAdjacentElement('afterend', successMsg);
+    }
     
     setTimeout(() => {
         successMsg.remove();
@@ -1063,5 +826,8 @@ function showCorrectionSection(data) {
         if (data.doc_id) {
             currentDocId = data.doc_id;
         }
+    } else if (data && data.doc_id) {
+        // Even if correction section doesn't exist, store doc_id
+        currentDocId = data.doc_id;
     }
 }

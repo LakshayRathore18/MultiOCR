@@ -33,10 +33,6 @@ It combines multiple OCR engines, applies a voting strategy, and tracks accuracy
   * Domain-specific vocabulary (Sanskrit)
   * Auto-fix & suggestion system
 
-* 🖼️ **Visualization**
-  * CRAFT-based character/line detection
-  * Bounding boxes & overlays
-
 ---
 
 ## 📋 Table of Contents
@@ -71,19 +67,22 @@ ollama pull deepseek-ocr
 ```bash
 git clone <repo-url>
 cd multiocr
-python -m venv .venv
+conda create -n multiocr python=3.12 -y
+conda activate multiocr
 ```
 
-**Activate virtual environment:**
+**Activate the environment:**
 
-Windows: `.venv\Scripts\Activate.ps1`  
-Linux/macOS: `source .venv/bin/activate`
+Windows PowerShell: `conda activate multiocr`
+Linux/macOS: `conda activate multiocr`
 
 ### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
+
+If you use the launcher scripts, activate the conda environment first so `python` and `pip` resolve to the project environment.
 
 ### 3. Configure Environment
 
@@ -139,8 +138,7 @@ Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your browser.
 3. **Voting Result**: View consolidated text from all models
 4. **Post-Correction**: Apply dictionary-based corrections
 5. **Character Error Rate**: See CER metrics for quality assessment
-6. **Visualizations**: View character detection bounding boxes
-7. **Download**: Export results as JSON or save to database
+6. **Download**: Export results as JSON or save to database
 
 ---
 
@@ -185,9 +183,8 @@ multiocr/
 ├── postOCR/          # Dictionary & correction logic
 ├── similarity/       # Embeddings & semantic search
 ├── database/         # PostgreSQL models
-├── static/           # CSS, JS, visualizations
+├── static/           # CSS and JS assets
 ├── templates/        # HTML templates
-├── char_visualisation/  # CRAFT character detection
 ├── docs/             # Documentation
 └── scripts/          # Utility scripts
 ```
@@ -201,8 +198,8 @@ multiocr/
 
 ```bash
 # 1. Setup
-python -m venv .venv
-.venv\Scripts\Activate.ps1  # Windows
+conda create -n multiocr python=3.12 -y
+conda activate multiocr  # Windows
 pip install -r requirements.txt
 
 # 2. Configure

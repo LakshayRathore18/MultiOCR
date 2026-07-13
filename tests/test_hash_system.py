@@ -1,8 +1,8 @@
 """
 Test script to verify hash-based document identity system
 """
-from image_hash import compute_image_hash_from_file
-from src.database.db import get_db
+from utils.image_hash import compute_image_hash_from_file
+from database.db import get_db
 import os
 
 def test_hash_system():

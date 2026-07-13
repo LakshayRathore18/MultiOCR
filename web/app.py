@@ -19,23 +19,13 @@ from ocr.easy_ocr import run_easyocr, init_easy_model
 from ocr.deepseek_ocr import run_deepseek, init_deepseek_model
 from ocr.voting import ocr_voting
 from ocr.benchmark import benchmark_ocr
-from ocr.tesseract_ocr import run_tesseract
 from ocr.normalize import validate_ocr_text
 import concurrent.futures
 
-# Lazy-load visualization (import on demand due to torch dependency)
-_generate_visualization = None
-def get_visualization_function():
-    global _generate_visualization
-    if _generate_visualization is None:
-        from visualize import generate_visualization as gv
-        _generate_visualization = gv
-    return _generate_visualization
-
 # Import database and CER modules
-from src.database.db import get_db
-from src.utils.cer import compute_cer
-from src.utils.image_hash import compute_image_hash
+from database.db import get_db
+from utils.cer import compute_cer
+from utils.image_hash import compute_image_hash
 from similarity.embeddings import embed_text
 from similarity.search import find_similar_documents
 
@@ -65,7 +55,6 @@ try:
     print("✓ EasyOCR loaded successfully!")
 except Exception as e:
     print(f"⚠️  Warning: EasyOCR failed to load: {e}")
-    print("   Falling back to Tesseract only.")
 
 try:
     deepseek_model = init_deepseek_model()
@@ -107,8 +96,7 @@ def get_session_data():
         'filepath': session.get('current_filepath'),
         'doc_id': session.get('current_doc_id'),
         'status': session.get('current_status'),
-        'ocr_results': session.get('current_ocr_results'),
-        'visualization_path': session.get('current_visualization_path')
+        'ocr_results': session.get('current_ocr_results')
     })
 
 @app.route('/upload', methods=['POST'])
@@ -496,74 +484,6 @@ def process_ocr():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/visualize', methods=['POST'])
-def visualize():
-    """
-    Generate character detection visualizations for uploaded image.
-    This includes bounding boxes, heatmaps, and line segmentation.
-    """
-    data = request.get_json()
-    filepath = data.get('filepath')
-    
-    if not filepath or not os.path.exists(filepath):
-        print(f"❌ Visualization error: File not found at {filepath}")
-        return jsonify({'error': 'File not found'}), 404
-    
-    try:
-        print(f"📊 Starting visualization for: {filepath}")
-        
-        # Create visualization output directory
-        filename = os.path.basename(filepath)
-        filename_no_ext = os.path.splitext(filename)[0]
-        output_dir = os.path.join('uploads', 'visualizations', filename_no_ext)
-        
-        # Ensure the output directory exists
-        os.makedirs(output_dir, exist_ok=True)
-        print(f"✓ Output directory created/verified: {output_dir}")
-        
-        # Generate visualizations
-        print("🔄 Calling generate_visualization...")
-        generate_visualization = get_visualization_function()
-        result = generate_visualization(filepath, output_dir)
-        print(f"✓ Visualization completed: {result.get('success', False)}")
-        
-        if result['success']:
-            # Return relative paths for frontend
-            images = {}
-            for key, path in result['images'].items():
-                # Convert absolute path to relative path for serving
-                rel_path = os.path.relpath(path, 'uploads').replace(os.sep, '/')
-                images[key] = f'/uploads/{rel_path}'
-                print(f"  ✓ Generated {key}: {images[key]}")
-            
-            # Store visualization paths in session
-            session['current_visualization_path'] = images.get('bounding_boxes')
-            session.permanent = True
-            
-            return jsonify({
-                'success': True,
-                'stats': result['stats'],
-                'images': images
-            })
-        else:
-            error_msg = result.get('error', 'Unknown error occurred')
-            print(f"❌ Visualization failed: {error_msg}")
-            return jsonify({
-                'success': False,
-                'error': error_msg
-            }), 500
-    
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"❌ Exception in visualize endpoint:")
-        print(error_trace)
-        return jsonify({
-            'success': False,
-            'error': f'Visualization failed: {str(e)}'
-        }), 500
-
-
 @app.route('/reprocess/<int:doc_id>', methods=['POST'])
 def reprocess_ocr(doc_id):
     """
@@ -939,21 +859,6 @@ def serve_uploads(filepath):
 if __name__ == '__main__':
     # Create necessary directories
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(os.path.join('uploads', 'visualizations'), exist_ok=True)
     print("✓ Directories created/verified")
-    
-    # Initialize CRAFT model at startup for faster visualizations
-    print("\n" + "="*60)
-    print("🚀 Initializing CRAFT model at startup...")
-    print("="*60)
-    try:
-        from visualize import get_craft_model
-        detector, device = get_craft_model()
-        print(f"✅ CRAFT model pre-loaded on {device}")
-        print("   Visualizations will be much faster now!")
-    except Exception as e:
-        print(f"⚠️  CRAFT initialization warning: {e}")
-        print("   (Visualizations will still work but will be slower on first request)")
-    print("="*60 + "\n")
     
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
