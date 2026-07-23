@@ -372,9 +372,19 @@ def process_ocr():
                 easy_data = easy_future.result() if easy_future else None
                 deepseek_data = deepseek_future.result() if deepseek_future else None
             
-            # Use PaddleOCR result (best overall performance)
-            final_output = paddle_data["results"]
-            
+            # Run ensemble voting: merges Paddle + DeepSeek using the voting engine.
+            # Handles 0-line edge cases automatically - if one engine failed or
+            # timed out it falls back to the other engine's results entirely.
+            deepseek_results_for_voting = deepseek_data["results"] if deepseek_data else None
+            final_output = ocr_voting(
+                paddle_data["results"],
+                deepseek_results=deepseek_results_for_voting
+            )
+
+            # Fallback: if voting produced nothing, use raw Paddle output
+            if not final_output:
+                final_output = paddle_data["results"]
+
             # Calculate Devanagari quality metrics
             full_text = '\n'.join([item['text'] for item in final_output])
             quality_metrics = validate_ocr_text(full_text)
@@ -414,7 +424,8 @@ def process_ocr():
                 'text': [
                     {
                         'text': item['text'],
-                        'confidence': round(item['confidence'], 4)
+                        'confidence': round(item['confidence'], 4),
+                        'source': item.get('source', 'unknown')
                     }
                     for item in final_output
                 ],
