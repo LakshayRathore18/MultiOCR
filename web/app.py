@@ -24,7 +24,6 @@ from ocr.normalize import validate_ocr_text
 # Import database and CER modules
 from database.db import get_db
 from utils.cer import compute_cer
-from utils.image_hash import compute_image_hash
 from similarity.embeddings import embed_text
 from similarity.search import find_similar_documents
 
@@ -101,7 +100,7 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI App
 app = FastAPI(
     title="Multi-Model OCR API",
-    description="Advanced Document Text Extraction with PaddleOCR, EasyOCR, and DeepSeek",
+    description="Advanced Document Text Extraction with PaddleOCR, EasyOCR, and DeepSeekOCR",
     lifespan=lifespan
 )
 
@@ -172,18 +171,30 @@ def get_session_data(request: Request):
     }
 
 
+@app.post('/api/clear-session')
+def clear_session(request: Request):
+    """Clear active document session data from server"""
+    session = request.session
+    session.pop('current_doc_id', None)
+    session.pop('current_filename', None)
+    session.pop('current_filepath', None)
+    session.pop('current_image_hash', None)
+    session.pop('current_status', None)
+    session.pop('current_ocr_results', None)
+    return {'success': True, 'message': 'Session cleared successfully'}
+
+
 @app.post('/upload')
 def upload_file(request: Request, file: UploadFile = File(...)):
-    """Handle image uploads, compute hash, check for duplicates"""
+    """Handle image uploads and save locally"""
     if not file or not file.filename:
         return JSONResponse(status_code=400, content={'error': 'No file provided'})
     
     if not allowed_file(file.filename):
         return JSONResponse(status_code=400, content={'error': 'Invalid file type. Allowed: PNG, JPG, JPEG, GIF, BMP, TIFF'})
     
-    # Read file bytes and compute hash
+    # Read file bytes
     file_bytes = file.file.read()
-    image_hash = compute_image_hash(file_bytes)
     
     from werkzeug.utils import secure_filename
     filename = secure_filename(file.filename)
@@ -196,55 +207,18 @@ def upload_file(request: Request, file: UploadFile = File(...)):
     # Store standard relative path for web access and database entry
     db_filepath = f"uploads/{filename}"
     
-    # Check if this image already exists in database
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        """SELECT id, image_path, corrected_text, status, version, cer 
-           FROM documents 
-           WHERE image_hash = %s 
-           ORDER BY version DESC LIMIT 1""",
-        (image_hash,)
-    )
-    existing_doc = cur.fetchone()
-    conn.close()
-    
     session = request.session
-    if existing_doc:
-        doc_id, old_path, corrected_text, status, version, cer = existing_doc
-        
-        # Store in session for persistence across navigation
-        session['current_doc_id'] = doc_id
-        session['current_filename'] = filename
-        session['current_filepath'] = db_filepath
-        session['current_image_hash'] = image_hash
-        session['current_status'] = status
-        
-        return {
-            'success': True,
-            'filename': filename,
-            'filepath': db_filepath,
-            'image_hash': image_hash,
-            'existing_document': True,
-            'doc_id': doc_id,
-            'status': status,
-            'version': version,
-            'has_correction': corrected_text is not None,
-            'cer': round(cer, 4) if cer else None,
-            'message': 'This image already exists. Showing latest version.'
-        }
-    
-    # Store in session for new documents
+    # New document session setup
+    session['current_doc_id'] = None
     session['current_filename'] = filename
     session['current_filepath'] = db_filepath
-    session['current_image_hash'] = image_hash
+    session['current_status'] = 'uploaded'
+    session.pop('current_ocr_results', None)
     
     return {
         'success': True,
         'filename': filename,
-        'filepath': db_filepath,
-        'image_hash': image_hash,
-        'existing_document': False
+        'filepath': db_filepath
     }
 
 
@@ -266,59 +240,7 @@ def process_ocr(request: Request, data: ProcessRequest):
     
     session = request.session
     
-    # Check if document exists and has corrections
-    if image_hash and not force_reprocess:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            """SELECT id, ocr_text, corrected_text, cer, status, version 
-               FROM documents 
-               WHERE image_hash = %s 
-               ORDER BY version DESC LIMIT 1""",
-            (image_hash,)
-        )
-        existing = cur.fetchone()
-        
-        if existing:
-            doc_id, ocr_text, corrected_text, cer, status, version = existing
-            
-            # If corrected version exists, return it
-            if corrected_text:
-                conn.close()
-                return {
-                    'success': True,
-                    'reused_existing': True,
-                    'doc_id': doc_id,
-                    'full_text': corrected_text,
-                    'status': status,
-                    'version': version,
-                    'cer': round(cer, 4) if cer else None,
-                    'message': 'Showing verified corrected version. Click "Re-run OCR" to reprocess.',
-                    'text': [{'text': line, 'confidence': 1.0} for line in corrected_text.split('\n') if line.strip()]
-                }
-            
-            # If only OCR exists, return that
-            elif ocr_text:
-                ocr_results = {
-                    'success': True,
-                    'reused_existing': True,
-                    'doc_id': doc_id,
-                    'full_text': ocr_text,
-                    'status': status,
-                    'version': version,
-                    'message': 'OCR already processed. Ready for review.',
-                    'text': [{'text': line, 'confidence': 0.0} for line in ocr_text.split('\n') if line.strip()]
-                }
-                # Store in session after successful processing
-                session['current_doc_id'] = doc_id
-                session['current_filepath'] = filepath
-                session['current_image_hash'] = image_hash
-                session['current_status'] = status
-                session['current_ocr_results'] = ocr_results
-                conn.close()
-                return ocr_results
-        
-        conn.close()
+
     
     try:
         if mode == 'paddleocr':
@@ -494,23 +416,74 @@ def process_ocr(request: Request, data: ProcessRequest):
                 'full_text': full_text
             }
         
+        # Check text-similarity fallback (85% Levenshtein ratio matching threshold)
+        text_for_match = results['full_text'].strip()
+        matched_doc = None
+        
+        if text_for_match and not force_reprocess:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT id, ocr_text, corrected_text, status, version, image_path, cer 
+                   FROM documents 
+                   WHERE ocr_text IS NOT NULL OR corrected_text IS NOT NULL
+                   ORDER BY id DESC"""
+            )
+            rows = cur.fetchall()
+            conn.close()
+            
+            import Levenshtein
+            for db_doc_id, db_ocr, db_corrected, db_status, db_version, db_image_path, db_cer in rows:
+                db_text = (db_corrected or db_ocr or '').strip()
+                if not db_text:
+                    continue
+                # Calculate Levenshtein similarity ratio
+                sim = Levenshtein.ratio(text_for_match, db_text)
+                if sim >= 0.85:
+                    print(f"🎯 Text-similarity match! doc_id: {db_doc_id} similarity: {sim:.4f}")
+                    matched_doc = (db_doc_id, db_ocr, db_corrected, db_status, db_version, db_image_path, db_cer)
+                    break
+                    
+        if matched_doc:
+            db_doc_id, db_ocr, db_corrected, db_status, db_version, db_image_path, db_cer = matched_doc
+            
+            if db_corrected:
+                ocr_results = {
+                    'success': True,
+                    'reused_existing': True,
+                    'doc_id': db_doc_id,
+                    'full_text': db_corrected,
+                    'status': db_status,
+                    'version': db_version,
+                    'cer': round(db_cer, 4) if db_cer else None,
+                    'message': '🎯 Image matched via text similarity! Reusing previous verified corrections.',
+                    'text': [{'text': line, 'confidence': 1.0} for line in db_corrected.split('\n') if line.strip()]
+                }
+            else:
+                ocr_results = {
+                    'success': True,
+                    'reused_existing': True,
+                    'doc_id': db_doc_id,
+                    'full_text': db_ocr,
+                    'status': db_status,
+                    'version': db_version,
+                    'message': '🎯 Image matched via text similarity! Reusing previous OCR results.',
+                    'text': [{'text': line, 'confidence': 0.0} for line in db_ocr.split('\n') if line.strip()]
+                }
+            
+            # Store in session
+            session['current_doc_id'] = db_doc_id
+            session['current_filepath'] = filepath
+            session['current_image_hash'] = image_hash
+            session['current_status'] = db_status
+            session['current_ocr_results'] = ocr_results
+            return ocr_results
+            
         # Save OCR result to database
         conn = get_db()
         cur = conn.cursor()
         parent_id = None
         current_version = 1
-        
-        if image_hash:
-            cur.execute(
-                """SELECT id, version FROM documents 
-                   WHERE image_hash = %s 
-                   ORDER BY version DESC LIMIT 1""",
-                (image_hash,)
-            )
-            existing = cur.fetchone()
-            if existing:
-                parent_id = existing[0]
-                current_version = existing[1] + 1
         
         # Generate text embedding
         text_for_embedding = results['full_text']

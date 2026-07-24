@@ -133,7 +133,6 @@ async function handleFileUpload(file) {
         
         if (data.success) {
             currentFilePath = data.filepath;
-            window.currentImageHash = data.image_hash;
             
             // Show preview
             const reader = new FileReader();
@@ -144,23 +143,10 @@ async function handleFileUpload(file) {
                 resultsSection.style.display = 'none';
                 resultsPlaceholder.style.display = 'block';
                 
-                // If existing document, show info
-                if (data.existing_document) {
-                    const msg = data.has_correction 
-                        ? `📋 This document already exists (v${data.version}). Showing verified version (CER: ${data.cer || 'N/A'}).`
-                        : `📋 This document already exists (v${data.version}). Click Parse to see results.`;
-                    showInfo(msg);
-                    window.existingDocId = data.doc_id;
-                    // Show reprocess button
-                    if (reprocessBtn) {
-                        reprocessBtn.style.display = 'block';
-                    }
-                } else {
-                    window.existingDocId = null;
-                    if (reprocessBtn) {
-                        reprocessBtn.style.display = 'none';
-                    }
+                if (reprocessBtn) {
+                    reprocessBtn.style.display = 'none';
                 }
+                hideInfo();
             };
             reader.readAsDataURL(file);
         } else {
@@ -197,9 +183,7 @@ parseBtn.addEventListener('click', async () => {
             },
             body: JSON.stringify({ 
                 filepath: currentFilePath,
-                mode: selectedMode,
-                image_hash: window.currentImageHash || null,
-                force_reprocess: false
+                mode: selectedMode
             })
         });
         
@@ -518,7 +502,7 @@ copyBtn.addEventListener('click', () => {
 });
 
 // Clear and upload new
-clearBtn.addEventListener('click', () => {
+clearBtn.addEventListener('click', async () => {
     currentFilePath = null;
     fileInput.value = '';
     previewSection.style.display = 'none';
@@ -526,6 +510,14 @@ clearBtn.addEventListener('click', () => {
     resultsSection.style.display = 'none';
     resultsPlaceholder.style.display = 'block';
     hideError();
+    hideInfo();
+    
+    // Clear session on server
+    try {
+        await fetch('/api/clear-session', { method: 'POST' });
+    } catch (e) {
+        console.log('Failed to clear server session:', e);
+    }
 });
 
 // Display individual engine results
