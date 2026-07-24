@@ -58,7 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Restore OCR results if available
             if (sessionData.ocr_results) {
                 console.log('📊 Restoring OCR results...');
-                displayOCRResults(sessionData.ocr_results);
+                displayResults(sessionData.ocr_results);
             }
         }
     } catch (error) {
@@ -469,19 +469,21 @@ function displayResults(data) {
         }
     }
     
-    // Add "Review & Correct" button if doc_id is present
-    if (data.doc_id) {
-        const reviewBtn = document.createElement('button');
-        reviewBtn.className = 'btn btn-success btn-block review-btn';
-        reviewBtn.innerHTML = '<span class="btn-icon">✏️</span> Review & Correct Text';
-        reviewBtn.onclick = () => {
+    // Always add "Review & Correct" button if we have text results
+    const reviewBtn = document.createElement('button');
+    reviewBtn.className = 'btn btn-success btn-block review-btn';
+    reviewBtn.innerHTML = '<span class="btn-icon">✏️</span> Review & Correct Text';
+    reviewBtn.onclick = () => {
+        if (data.doc_id) {
             window.location.href = `/review/${data.doc_id}`;
-        };
-        
-        // Insert after full text area
-        const fullTextArea = document.querySelector('.full-text-area');
-        fullTextArea.insertAdjacentElement('afterend', reviewBtn);
-    }
+        } else {
+            window.location.href = '/review/new';
+        }
+    };
+    
+    // Insert after full text area
+    const fullTextArea = document.querySelector('.full-text-area');
+    fullTextArea.insertAdjacentElement('afterend', reviewBtn);
     
     // Show correction section
     showCorrectionSection(data);

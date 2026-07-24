@@ -336,7 +336,7 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     text: text,
-                    doc_id: '{{ doc_id }}',
+                    doc_id: '{{ doc_id }}' === 'new' ? null : parseInt('{{ doc_id }}'),
                     confidence_threshold: 'MEDIUM'
                 })
             })
@@ -685,6 +685,13 @@
                 
                 if (response.ok) {
                     showNotification(data.message || 'Saved successfully!', 'success', 'Success');
+                    
+                    if ('{{ doc_id }}' === 'new' && data.doc_id) {
+                        setTimeout(() => {
+                            window.location.href = `/review/${data.doc_id}`;
+                        }, 1000);
+                        return;
+                    }
                     
                     // Update CER display if returned
                     if (data.cer !== undefined && data.cer !== null) {

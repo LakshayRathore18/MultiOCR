@@ -28,7 +28,7 @@ from similarity.embeddings import embed_text
 from similarity.search import find_similar_documents
 
 # FastAPI imports
-from fastapi import FastAPI, Request, File, UploadFile
+from fastapi import FastAPI, Request, File, UploadFile, Response
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -123,6 +123,7 @@ class ProcessRequest(BaseModel):
     image_hash: Optional[str] = None
     force_reprocess: bool = False
 
+
 class CorrectRequest(BaseModel):
     text: str
     doc_id: Optional[int] = None
@@ -147,6 +148,47 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def compact_results_for_session(results):
+    """Create a compact copy of OCR results to fit inside browser cookie session limits (<4KB)"""
+    if not results:
+        return None
+    compact = {
+        'success': results.get('success'),
+        'mode': results.get('mode'),
+        'devanagari_quality': results.get('devanagari_quality'),
+        'text': results.get('text'),
+        'full_text': results.get('full_text'),
+        'doc_id': results.get('doc_id'),
+        'version': results.get('version'),
+        'is_reprocess': results.get('is_reprocess'),
+        'reused_existing': results.get('reused_existing'),
+        'message': results.get('message'),
+        'cer': results.get('cer')
+    }
+    if 'benchmark' in results and results['benchmark']:
+        compact_bench = {}
+        for engine, data in results['benchmark'].items():
+            if data:
+                compact_bench[engine] = {
+                    'time': data.get('time'),
+                    'lines': data.get('lines'),
+                    'avg_confidence': data.get('avg_confidence')
+                }
+        compact['benchmark'] = compact_bench
+    return compact
+
+
+# Server-side in-memory session store to bypass 4KB cookie size limits
+TEMP_SESSION_STORE = {
+    'current_doc_id': None,
+    'current_filename': None,
+    'current_filepath': None,
+    'current_image_hash': None,
+    'current_status': None,
+    'current_ocr_results': None
+}
+
+
 # ----------------------------------------------------
 # Route Handlers
 # ----------------------------------------------------
@@ -160,28 +202,32 @@ def index(request: Request):
 @app.get('/api/session-data')
 def get_session_data(request: Request):
     """Get persisted session data for current document"""
-    session = request.session
     return {
-        'has_session': bool(session.get('current_filepath')),
-        'filename': session.get('current_filename'),
-        'filepath': session.get('current_filepath'),
-        'doc_id': session.get('current_doc_id'),
-        'status': session.get('current_status'),
-        'ocr_results': session.get('current_ocr_results')
+        'has_session': bool(TEMP_SESSION_STORE.get('current_filepath')),
+        'filename': TEMP_SESSION_STORE.get('current_filename'),
+        'filepath': TEMP_SESSION_STORE.get('current_filepath'),
+        'doc_id': TEMP_SESSION_STORE.get('current_doc_id'),
+        'status': TEMP_SESSION_STORE.get('current_status'),
+        'ocr_results': TEMP_SESSION_STORE.get('current_ocr_results')
     }
 
 
 @app.post('/api/clear-session')
 def clear_session(request: Request):
     """Clear active document session data from server"""
-    session = request.session
-    session.pop('current_doc_id', None)
-    session.pop('current_filename', None)
-    session.pop('current_filepath', None)
-    session.pop('current_image_hash', None)
-    session.pop('current_status', None)
-    session.pop('current_ocr_results', None)
+    TEMP_SESSION_STORE['current_doc_id'] = None
+    TEMP_SESSION_STORE['current_filename'] = None
+    TEMP_SESSION_STORE['current_filepath'] = None
+    TEMP_SESSION_STORE['current_image_hash'] = None
+    TEMP_SESSION_STORE['current_status'] = None
+    TEMP_SESSION_STORE['current_ocr_results'] = None
     return {'success': True, 'message': 'Session cleared successfully'}
+
+
+@app.get('/favicon.ico', include_in_schema=False)
+def favicon():
+    """Silence browser favicon 404 logs"""
+    return Response(status_code=204)
 
 
 @app.post('/upload')
@@ -207,13 +253,12 @@ def upload_file(request: Request, file: UploadFile = File(...)):
     # Store standard relative path for web access and database entry
     db_filepath = f"uploads/{filename}"
     
-    session = request.session
     # New document session setup
-    session['current_doc_id'] = None
-    session['current_filename'] = filename
-    session['current_filepath'] = db_filepath
-    session['current_status'] = 'uploaded'
-    session.pop('current_ocr_results', None)
+    TEMP_SESSION_STORE['current_doc_id'] = None
+    TEMP_SESSION_STORE['current_filename'] = filename
+    TEMP_SESSION_STORE['current_filepath'] = db_filepath
+    TEMP_SESSION_STORE['current_status'] = 'uploaded'
+    TEMP_SESSION_STORE['current_ocr_results'] = None
     
     return {
         'success': True,
@@ -472,50 +517,24 @@ def process_ocr(request: Request, data: ProcessRequest):
                 }
             
             # Store in session
-            session['current_doc_id'] = db_doc_id
-            session['current_filepath'] = filepath
-            session['current_image_hash'] = image_hash
-            session['current_status'] = db_status
-            session['current_ocr_results'] = ocr_results
+            TEMP_SESSION_STORE['current_doc_id'] = db_doc_id
+            TEMP_SESSION_STORE['current_filepath'] = filepath
+            TEMP_SESSION_STORE['current_image_hash'] = image_hash
+            TEMP_SESSION_STORE['current_status'] = db_status
+            TEMP_SESSION_STORE['current_ocr_results'] = ocr_results
             return ocr_results
             
-        # Save OCR result to database
-        conn = get_db()
-        cur = conn.cursor()
-        parent_id = None
-        current_version = 1
+        # DO NOT save document to database yet. It will be saved when user clicks 'Review'.
+        TEMP_SESSION_STORE['current_doc_id'] = None
+        TEMP_SESSION_STORE['current_filepath'] = filepath
+        TEMP_SESSION_STORE['current_image_hash'] = image_hash
+        TEMP_SESSION_STORE['current_status'] = 'processed'
         
-        # Generate text embedding
-        text_for_embedding = results['full_text']
-        embedding = None
-        try:
-            embedding = embed_text(text_for_embedding)
-        except Exception as e:
-            print(f"⚠️  Failed to generate embedding: {e}")
+        results['doc_id'] = None
+        results['version'] = 1
+        results['is_reprocess'] = False
         
-        cur.execute(
-            """
-            INSERT INTO documents (image_path, image_hash, ocr_text, status, version, parent_id, text_embedding)
-            VALUES (%s, %s, %s, 'ocr', %s, %s, %s)
-            RETURNING id
-            """,
-            (filepath, image_hash, results['full_text'], current_version, parent_id, 
-             json.dumps(embedding) if embedding else None)
-        )
-        doc_id = cur.fetchone()[0]
-        conn.commit()
-        conn.close()
-        
-        session['current_doc_id'] = doc_id
-        session['current_filepath'] = filepath
-        session['current_image_hash'] = image_hash
-        session['current_status'] = 'processed'
-        
-        results['doc_id'] = doc_id
-        results['version'] = current_version
-        results['is_reprocess'] = parent_id is not None
-        
-        session['current_ocr_results'] = results
+        TEMP_SESSION_STORE['current_ocr_results'] = results
         
         return results
     
@@ -554,6 +573,106 @@ def reprocess_ocr(doc_id: int):
         'filepath': image_path,
         'image_hash': image_hash,
         'has_correction': corrected_text is not None
+    }
+
+
+@app.get('/review/new', response_class=HTMLResponse)
+def review_new_get(request: Request):
+    """Show the human-in-the-loop validation page for unsaved document draft"""
+    image_path = TEMP_SESSION_STORE.get('current_filepath')
+    ocr_results = TEMP_SESSION_STORE.get('current_ocr_results')
+    
+    if not image_path or not ocr_results:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse('/')
+        
+    ocr_text = ocr_results.get('full_text', '')
+    corrected_text = None
+    cer = None
+    status = 'ocr'
+    version = 1
+    version_history = []
+    similar_docs = []
+    
+    # Find similar documents for correction suggestion references
+    try:
+        if ocr_text:
+            similar_docs = find_similar_documents(
+                current_text=ocr_text,
+                current_doc_id=None,
+                threshold=0.3,
+                limit=5
+            )
+    except Exception as e:
+        print(f"⚠️  Failed to find similar documents: {e}")
+        
+    return templates.TemplateResponse(
+        "review_new.html",
+        {
+            "request": request,
+            "doc_id": "new",
+            "image_path": image_path,
+            "ocr_text": ocr_text,
+            "corrected_text": corrected_text,
+            "cer": cer,
+            "status": status,
+            "version": version,
+            "version_history": version_history,
+            "similar_docs": similar_docs
+        }
+    )
+
+
+@app.post('/review/new')
+def review_new_post(request: Request, data: SaveCorrectionRequest):
+    """Create the document in database and save the corrected text for the first time"""
+    corrected = data.corrected_text.strip()
+    
+    if not corrected:
+        return JSONResponse(status_code=400, content={'error': 'No corrected text provided'})
+        
+    filepath = TEMP_SESSION_STORE.get('current_filepath')
+    ocr_results = TEMP_SESSION_STORE.get('current_ocr_results')
+    
+    if not filepath or not ocr_results:
+        return JSONResponse(status_code=400, content={'error': 'No active session found'})
+        
+    ocr_text = ocr_results.get('full_text', '')
+    cer = compute_cer(ocr_text, corrected) if ocr_text else None
+    
+    # Generate text embedding
+    embedding = None
+    try:
+        embedding = embed_text(corrected)
+    except Exception as e:
+        print(f"⚠️  Failed to generate embedding: {e}")
+        
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO documents (image_path, ocr_text, corrected_text, status, version, parent_id, text_embedding, cer)
+        VALUES (%s, %s, %s, 'corrected', 1, NULL, %s, %s)
+        RETURNING id
+        """,
+        (filepath, ocr_text, corrected, json.dumps(embedding) if embedding else None, cer)
+    )
+    doc_id = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    
+    # Update session variables
+    TEMP_SESSION_STORE['current_doc_id'] = doc_id
+    TEMP_SESSION_STORE['current_status'] = 'corrected'
+    if isinstance(TEMP_SESSION_STORE.get('current_ocr_results'), dict):
+        TEMP_SESSION_STORE['current_ocr_results']['doc_id'] = doc_id
+        
+    return {
+        'success': True,
+        'doc_id': doc_id,
+        'cer': cer,
+        'version': 1,
+        'message': '✓ Document draft saved and corrections applied successfully!'
     }
 
 
