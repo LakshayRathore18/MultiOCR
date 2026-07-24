@@ -61,22 +61,32 @@ def word_similarity(text1: str, text2: str) -> float:
     
     return intersection / union
 
-def find_similar_documents(current_text: str = None, current_embedding: list = None, current_doc_id: int = None, threshold: float = 0.3, limit: int = 5):
+def find_similar_documents(current_text: str = None, current_embedding: list = None, current_doc_id: int = None, threshold: float = 0.3, limit: int = 5, use_embeddings: bool = True):
     """
-    Find similar documents based on word-level similarity.
+    Find similar documents based on cosine similarity of text embeddings (SentenceTransformer)
+    with a fallback to word-level Jaccard similarity.
     
     Args:
-        current_text: Text of current document (for word-based comparison)
-        current_embedding: Embedding vector (kept for backward compatibility but not used)
+        current_text: Text of current document
+        current_embedding: Embedding vector of current document
         current_doc_id: ID of current document (to exclude from results)
-        threshold: Minimum similarity score (0.0 to 1.0) - lowered default for word-based
+        threshold: Minimum similarity score (0.0 to 1.0)
         limit: Maximum number of results to return
+        use_embeddings: If True, attempts to use vector similarity
         
     Returns:
         List of similar documents with metadata
     """
     if not current_text:
         return []
+        
+    # Generate query embedding if not provided and use_embeddings is True
+    if current_embedding is None and use_embeddings:
+        try:
+            from similarity.embeddings import embed_text
+            current_embedding = embed_text(current_text)
+        except Exception as e:
+            print(f"⚠️ Failed to generate embedding for similarity search: {e}")
     
     conn = get_db()
     cur = conn.cursor()
@@ -84,7 +94,7 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
     # Fetch all documents with text (exclude current document)
     if current_doc_id:
         cur.execute("""
-            SELECT id, corrected_text, ocr_text, image_path, cer, status, version
+            SELECT id, corrected_text, ocr_text, image_path, cer, status, version, text_embedding
             FROM documents
             WHERE id != %s
             ORDER BY updated_at DESC
@@ -92,7 +102,7 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
         """, (current_doc_id,))
     else:
         cur.execute("""
-            SELECT id, corrected_text, ocr_text, image_path, cer, status, version
+            SELECT id, corrected_text, ocr_text, image_path, cer, status, version, text_embedding
             FROM documents
             ORDER BY updated_at DESC
             LIMIT 100
@@ -103,7 +113,7 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
     
     matches = []
     for row in rows:
-        doc_id, corrected_text, ocr_text, image_path, cer, status, version = row
+        doc_id, corrected_text, ocr_text, image_path, cer, status, version, text_embedding = row
         
         # Prefer corrected text over OCR text
         compare_text = corrected_text if corrected_text else ocr_text
@@ -111,8 +121,27 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
         if not compare_text:
             continue
         
-        # Compute word-level similarity
-        score = word_similarity(current_text, compare_text)
+        score = 0.0
+        used_embedding = False
+        
+        if use_embeddings and current_embedding and text_embedding:
+            try:
+                # Handle potential JSON formats of text_embedding
+                if isinstance(text_embedding, str):
+                    import json
+                    db_emb = json.loads(text_embedding)
+                else:
+                    db_emb = text_embedding
+                
+                if isinstance(db_emb, list) and len(db_emb) > 0:
+                    score = cosine_similarity(current_embedding, db_emb)
+                    used_embedding = True
+            except Exception as e:
+                print(f"⚠️ Error calculating cosine similarity for doc_id {doc_id}: {e}")
+        
+        if not used_embedding:
+            # Fallback to word-level Jaccard similarity
+            score = word_similarity(current_text, compare_text)
         
         if score >= threshold:
             matches.append({
@@ -124,7 +153,8 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
                 "cer": round(cer, 4) if cer else None,
                 "status": status,
                 "version": version,
-                "has_correction": corrected_text is not None
+                "has_correction": corrected_text is not None,
+                "similarity_method": "cosine" if used_embedding else "jaccard"
             })
     
     # Sort by similarity score (highest first)
