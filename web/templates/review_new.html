@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Review & Correct - OCR</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='review_new.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='review_new.css') }}">
     <style>
         /* Custom Notification Styles */
         .notification-container {
@@ -121,7 +121,7 @@
             <!-- LEFT PANEL: Original Image & OCR Output -->
             <div class="panel">
                 <h2>📄 Original Document</h2>
-                <img src="{{ url_for('static', filename='../') }}{{ image_path }}" alt="Document" class="image-preview">
+                <img src="/{{ image_path }}" alt="Document" class="image-preview">
                 
                 <h2 style="margin-top: 20px;">🤖 OCR Output</h2>
                 <div class="ocr-text">{{ ocr_text }}</div>
@@ -239,8 +239,11 @@
                         const displayClass = displayIdx < 2 ? 'show' : '';
                         html += '<div class="error-item error-display ' + displayClass + '" data-error-index="' + displayIdx + '" style="border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 10px;">';
                         html += '<strong>❌ "' + escapeHtml(err.word) + '"</strong>';
-                        html += '<br><small>Click suggestion to replace:</small>';
+                        html += '<br><small>Click suggestion to replace, or keep the original:</small>';
                         html += '<div class="suggestion-badges" style="display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0;">';
+                        // Keep Original button
+                        html += '<button class="suggestion-badge original-word-badge" style="background: #e8f5e9; border: 1px solid #81c784; color: #2e7d32; cursor: pointer;" onclick="addToDictOnly(\'' + escapedOriginalWord + '\')"><strong>✔ Keep: ' + escapeHtml(err.word) + '</strong></button>';
+                        
                         err.suggestions.slice(0, 5).forEach((suggestion, sIdx) => {
                             // Extract word from tuple format: ['MEDIUM', 'word'] -> 'word'
                             let suggestionText;
@@ -252,7 +255,7 @@
                                 suggestionText = suggestion.word || suggestion.text || String(suggestion);
                             }
                             const escapedSuggestion = suggestionText.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
-                            html += '<button class="suggestion-badge" onclick="applySuggestion(\'' + escapedOriginalWord + '\', \'' + escapedSuggestion + '\')"><strong>' + escapeHtml(suggestionText) + '</strong></button>';
+                            html += '<button class="suggestion-badge" onclick="applySuggestionAndSave(\'' + escapedOriginalWord + '\', \'' + escapedSuggestion + '\')"><strong>' + escapeHtml(suggestionText) + '</strong></button>';
                         });
                         html += '</div>';
                         html += '<div style="margin-top: 10px; padding: 10px; background: #f0f8ff; border: 1px dashed #4CAF50; border-radius: 4px;">';
@@ -285,9 +288,11 @@
                             html += '<div class="error-item">';
                             html += '<strong>⚠️ "' + escapeHtml(err.word) + '"</strong><br>';
                             html += '<small>This word is not in our dictionary. Provide the correct word:</small>';
-                            html += '<div style="margin-top: 8px; display: flex; gap: 8px;">';
+                            html += '<div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">';
                             html += '<input type="text" placeholder="Correct word..." id="dict-input-' + idx + '" style="flex: 1; padding: 6px; border: 1px solid #ff9800; border-radius: 4px;">';
                             html += '<button class="btn-apply" onclick="addToDictionary(\'' + err.word.replace(/'/g, "\\'") + '\', \'dict-input-' + idx + '\')">Add</button>';
+                            html += '<span style="color: #666; font-size: 0.9em; margin: 0 4px;">or</span>';
+                            html += '<button class="btn-apply" style="background: #e8f5e9; border: 1px solid #81c784; color: #2e7d32;" onclick="addToDictOnly(\'' + err.word.replace(/'/g, "\\'") + '\')">✔ Already Correct</button>';
                             html += '</div>';
                             html += '</div>';
                         });
@@ -510,6 +515,44 @@
                 notification.style.animation = 'fadeOut 0.3s ease';
                 setTimeout(() => notification.remove(), 300);
             }, 3000);
+        }
+
+        function applySuggestionAndSave(incorrectWord, correctWord) {
+            console.log('Applying suggestion and saving to dictionary: "' + incorrectWord + '" -> "' + correctWord + '"');
+            applySuggestion(incorrectWord, correctWord);
+            saveToDictionary(incorrectWord, correctWord);
+        }
+
+        function addToDictOnly(word) {
+            console.log('🎯 Adding original word directly to dictionary: "' + word + '"');
+            
+            fetch('/add-to-dictionary', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    original_word: word,
+                    corrected_word: word
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('✅ Added to dictionary:', data.message);
+                    showNotification('✅ Added "' + word + '" to dictionary as correct!', 'success', 'Dictionary Updated');
+                    
+                    // Re-run detect to update suggestions list
+                    setTimeout(() => {
+                        detectBtn.click();
+                    }, 500);
+                } else {
+                    console.error('❌ Failed to add to dictionary:', data.error);
+                    showNotification('❌ Failed: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error:', error);
+                showNotification('❌ Error saving to dictionary', 'error');
+            });
         }
 
         function applySuggestionWithOption(incorrectWord, correctWord, errorIdx) {

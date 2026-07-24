@@ -7,5 +7,5 @@ Write-Host ""
 Write-Host "Using active Python environment" -ForegroundColor Green
 Write-Host ""
 
-# Start the Flask app
-python app.py
+# Start the FastAPI app via Uvicorn
+uvicorn web.app:app --host 0.0.0.0 --port 5000 --reload

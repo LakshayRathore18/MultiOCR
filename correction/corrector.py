@@ -19,7 +19,7 @@ class OCRCorrector:
         # For Devanagari/Sanskrit: allow distance of 2 for character modifications
         # (vowel marks, nuktā, anusvāra differences are significant but should still match)
         self.max_edit_distance = 2
-        self.max_suggestions = 5  # Top 5 suggestions only
+        self.max_suggestions = 15  # Increased for Sanskrit manual selection
         self.suggestion_cache = {}  # Cache for suggestions
         
         self.stats = {

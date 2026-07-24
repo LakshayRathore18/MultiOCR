@@ -11,7 +11,7 @@ from pathlib import Path
 correction_path = os.path.join(os.path.dirname(__file__), 'correction')
 sys.path.insert(0, correction_path)
 
-from correction.src.core.corrector import OCRCorrector
+from correction.corrector import OCRCorrector
 
 # Global corrector instance
 _corrector = None

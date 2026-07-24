@@ -79,33 +79,80 @@ class DeepSeekEngine:
         # Encode image
         base64_image = self._encode_image(image_path)
         
-        # Prepare API request (Ollama format)
         headers = {
             "Content-Type": "application/json"
         }
         
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Read the text in this image.",
-                    "images": [base64_image]
-                }
-            ],
-            "stream": False
-        }
+        # Determine if we should use /api/generate or /api/chat
+        is_chat = "/api/chat" in self.api_url
+        
+        if is_chat:
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Read the text in this image.",
+                        "images": [base64_image]
+                    }
+                ],
+                "stream": False
+            }
+        else:
+            payload = {
+                "model": self.model,
+                "prompt": "Read the text in this image.",
+                "images": [base64_image],
+                "stream": False
+            }
 
-        
-        # Make API request
-        response = requests.post(self.api_url, headers=headers, json=payload, timeout=120)
-        response.raise_for_status()
-        
-        # Extract text from response (Ollama format)
-        result = response.json()
-        text = result.get("message", {}).get("content", "")
-        
-        return text.strip()
+        try:
+            response = requests.post(self.api_url, headers=headers, json=payload, timeout=120)
+            response.raise_for_status()
+            result = response.json()
+            
+            if is_chat:
+                text = result.get("message", {}).get("content", "")
+            else:
+                text = result.get("response", "")
+                
+            # Fallback: if chat returned empty text or special tokens (like <|im_end|>), 
+            # try running /api/generate as fallback!
+            if is_chat and (not text.strip() or "<|im_end|>" in text or text.strip() == "<|im_end|>"):
+                print("⚠️  DeepSeek chat endpoint returned empty/invalid response. Attempting generate fallback...")
+                fallback_url = self.api_url.replace("/api/chat", "/api/generate")
+                fallback_payload = {
+                    "model": self.model,
+                    "prompt": "Read the text in this image.",
+                    "images": [base64_image],
+                    "stream": False
+                }
+                fallback_resp = requests.post(fallback_url, headers=headers, json=fallback_payload, timeout=120)
+                fallback_resp.raise_for_status()
+                fallback_result = fallback_resp.json()
+                text = fallback_result.get("response", "")
+                
+            return text.strip()
+            
+        except Exception as e:
+            # If the chat request itself failed (e.g. 500 error), try generate fallback
+            if is_chat:
+                try:
+                    print(f"⚠️  DeepSeek chat failed ({e}). Attempting generate fallback...")
+                    fallback_url = self.api_url.replace("/api/chat", "/api/generate")
+                    fallback_payload = {
+                        "model": self.model,
+                        "prompt": "Read the text in this image.",
+                        "images": [base64_image],
+                        "stream": False
+                    }
+                    fallback_resp = requests.post(fallback_url, headers=headers, json=fallback_payload, timeout=120)
+                    fallback_resp.raise_for_status()
+                    fallback_result = fallback_resp.json()
+                    return fallback_result.get("response", "").strip()
+                except Exception as fallback_err:
+                    print(f"❌ Both chat and generate failed. Fallback error: {fallback_err}")
+            raise e
 
 
 def init_deepseek_model():

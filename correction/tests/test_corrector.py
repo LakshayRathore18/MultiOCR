@@ -5,11 +5,11 @@ Test suite for OCR Corrector
 import sys
 from pathlib import Path
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add parent directory of correction package to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.core.corrector import OCRCorrector
-from src.core.edit_distance import levenshtein_distance
+from correction.corrector import OCRCorrector
+from correction.edit_distance import levenshtein_distance
 
 
 def test_levenshtein_distance():

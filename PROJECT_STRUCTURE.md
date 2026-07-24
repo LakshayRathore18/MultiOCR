@@ -40,15 +40,11 @@ This document explains the purpose of each folder and file in the MultiOCR proje
 ### `/correction/` - Text Correction Module
 **Purpose**: Text correction module using learned confusion pairs and dictionary
 
-#### `/correction/src/core/` - Core Correction Logic
 - **`corrector.py`** - Main text correction engine using trie-based dictionary matching
 - **`confusion_pairs.py`** - Manages learned OCR error patterns (e.g., '0' -> 'O')
 - **`dictionary.py`** - Dictionary management for valid word lookup
 - **`edit_distance.py`** - Levenshtein distance calculation for similarity
 - **`lcs.py`** - Longest Common Subsequence algorithm for text alignment
-
-#### `/correction/src/utils/` - Correction Utilities
-- **`__init__.py`** - Package initialization (empty)
 - **`file_handler.py`** - File I/O utilities for correction module
 
 #### `/correction/data/` - Dictionary Data
@@ -184,7 +180,7 @@ The following changes were made to clean up the project structure:
 - `from src.database.db import get_db` → `from database.db import get_db`
 - `from src.utils.cer import compute_cer` → `from utils.cer import compute_cer`
 - `from src.utils.image_hash import compute_image_hash` → `from utils.image_hash import compute_image_hash`
-- `from postOCR.src.core.corrector import OCRCorrector` → `from correction.src.core.corrector import OCRCorrector`
+- `from postOCR.src.core.corrector import OCRCorrector` → `from correction.corrector import OCRCorrector`
 
 ### Files Updated:
 - `postocr_integration.py` - Updated correction module paths
