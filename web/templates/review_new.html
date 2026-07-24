@@ -114,7 +114,7 @@
     <div class="container">
         <div class="header">
             <h1>✏️ Review & Correct OCR Output</h1>
-            <a href="/" class="btn-back-header">⬅️ Back Home</a>
+            <a href="#" class="btn-back-header" onclick="fetch('/api/clear-session',{method:'POST'}).then(()=>window.location.href='/');return false;">⬅️ Back Home</a>
         </div>
         
         <div class="grid">
