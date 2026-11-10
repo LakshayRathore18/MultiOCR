@@ -83,7 +83,8 @@ def setup_database():
                 status VARCHAR(20) DEFAULT 'ocr' CHECK (status IN ('pending', 'ocr', 'corrected', 'reviewed')),
                 
                 -- Similarity search
-                text_embedding JSONB,
+                ocr_embedding JSONB,  -- Original, uncorrected OCR
+                text_embedding JSONB, -- Saved corrected text only
                 
                 -- Timestamps
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-Model OCR - Document Parser</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v=compact-ocr-height">
 </head>
 <body>
     <div class="container">
@@ -149,8 +149,21 @@
                 </div>
             </div>
         </div>
+
+        <!-- References sit below and outside the upload/output box. -->
+        <section class="home-similar-documents" id="similarDocuments" aria-labelledby="similarDocumentsTitle" hidden>
+            <div class="panel-header">
+                <h2 id="similarDocumentsTitle">📚 Similar Documents</h2>
+            </div>
+            <p class="similar-documents-hint">Previous OCR and saved corrections for reference.</p>
+            <p id="similarDocumentsStatus" role="status" aria-live="polite"></p>
+            <button class="btn btn-primary btn-small" id="retrySimilarDocuments" type="button" hidden>Retry search</button>
+            <div id="similarDocumentsList"></div>
+            <button class="btn btn-primary btn-small home-similar-more" id="moreSimilarDocuments" type="button" aria-controls="similarDocumentsList" aria-expanded="false" hidden>View more</button>
+        </section>
     </div>
 
-    <script src="{{ url_for('static', path='script.js') }}"></script>
+    <script src="{{ url_for('static', path='similar_documents.js') }}?v=vibrant-references"></script>
+    <script src="{{ url_for('static', path='script.js') }}?v=restored"></script>
 </body>
 </html>

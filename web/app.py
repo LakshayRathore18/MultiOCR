@@ -24,7 +24,7 @@ from ocr.normalize import validate_ocr_text
 # Import database and CER modules
 from database.db import get_db
 from utils.cer import compute_cer
-from similarity.embeddings import embed_text
+from similarity.embeddings import safe_embed_text
 from similarity.search import find_similar_documents
 
 # FastAPI imports
@@ -141,6 +141,11 @@ class AddToDictionaryRequest(BaseModel):
 class SaveCorrectionRequest(BaseModel):
     corrected_text: str
     status: str = 'corrected'
+
+
+class SimilarDocumentsRequest(BaseModel):
+    text: str
+    doc_id: Optional[int] = None
 
 
 def allowed_file(filename):
@@ -273,7 +278,6 @@ def process_ocr(request: Request, data: ProcessRequest):
     filepath = data.filepath
     mode = data.mode
     image_hash = data.image_hash
-    force_reprocess = data.force_reprocess
     
     # Resolve absolute path for processing
     abs_filepath = filepath
@@ -461,76 +465,16 @@ def process_ocr(request: Request, data: ProcessRequest):
                 'full_text': full_text
             }
         
-        # Check text-similarity fallback (85% Levenshtein ratio matching threshold)
-        text_for_match = results['full_text'].strip()
-        matched_doc = None
-        
-        if text_for_match and not force_reprocess:
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute(
-                """SELECT id, ocr_text, corrected_text, status, version, image_path, cer 
-                   FROM documents 
-                   WHERE ocr_text IS NOT NULL OR corrected_text IS NOT NULL
-                   ORDER BY id DESC"""
-            )
-            rows = cur.fetchall()
-            conn.close()
-            
-            import Levenshtein
-            for db_doc_id, db_ocr, db_corrected, db_status, db_version, db_image_path, db_cer in rows:
-                db_text = (db_corrected or db_ocr or '').strip()
-                if not db_text:
-                    continue
-                # Calculate Levenshtein similarity ratio
-                sim = Levenshtein.ratio(text_for_match, db_text)
-                if sim >= 0.85:
-                    print(f"🎯 Text-similarity match! doc_id: {db_doc_id} similarity: {sim:.4f}")
-                    matched_doc = (db_doc_id, db_ocr, db_corrected, db_status, db_version, db_image_path, db_cer)
-                    break
-                    
-        if matched_doc:
-            db_doc_id, db_ocr, db_corrected, db_status, db_version, db_image_path, db_cer = matched_doc
-            
-            if db_corrected:
-                ocr_results = {
-                    'success': True,
-                    'reused_existing': True,
-                    'doc_id': db_doc_id,
-                    'full_text': db_corrected,
-                    'status': db_status,
-                    'version': db_version,
-                    'cer': round(db_cer, 4) if db_cer else None,
-                    'message': '🎯 Image matched via text similarity! Reusing previous verified corrections.',
-                    'text': [{'text': line, 'confidence': 1.0} for line in db_corrected.split('\n') if line.strip()]
-                }
-            else:
-                ocr_results = {
-                    'success': True,
-                    'reused_existing': True,
-                    'doc_id': db_doc_id,
-                    'full_text': db_ocr,
-                    'status': db_status,
-                    'version': db_version,
-                    'message': '🎯 Image matched via text similarity! Reusing previous OCR results.',
-                    'text': [{'text': line, 'confidence': 0.0} for line in db_ocr.split('\n') if line.strip()]
-                }
-            
-            # Store in session
-            TEMP_SESSION_STORE['current_doc_id'] = db_doc_id
-            TEMP_SESSION_STORE['current_filepath'] = filepath
-            TEMP_SESSION_STORE['current_image_hash'] = image_hash
-            TEMP_SESSION_STORE['current_status'] = db_status
-            TEMP_SESSION_STORE['current_ocr_results'] = ocr_results
-            return ocr_results
-            
-        # DO NOT save document to database yet. It will be saved when user clicks 'Review'.
+        # Always preserve this upload's fresh OCR. Previous documents are
+        # references on the review page, never automatic replacements.
+        # Save to the database only when the user saves their reviewed text.
         TEMP_SESSION_STORE['current_doc_id'] = None
         TEMP_SESSION_STORE['current_filepath'] = filepath
         TEMP_SESSION_STORE['current_image_hash'] = image_hash
         TEMP_SESSION_STORE['current_status'] = 'processed'
         
         results['doc_id'] = None
+        results['reused_existing'] = False
         results['version'] = 1
         results['is_reprocess'] = False
         
@@ -574,6 +518,24 @@ def reprocess_ocr(doc_id: int):
         'image_hash': image_hash,
         'has_correction': corrected_text is not None
     }
+
+
+@app.post('/similar-documents')
+def similar_documents(data: SimilarDocumentsRequest):
+    """Find references without delaying OCR output or replacing its text."""
+    if not data.text.strip():
+        return {'success': True, 'similar_docs': []}
+    try:
+        matches = find_similar_documents(
+            current_text=data.text, current_doc_id=data.doc_id,
+            threshold=0.3, limit=100
+        )
+        return {'success': True, 'similar_docs': matches}
+    except Exception as exc:
+        print(f"Failed to find similar documents: {exc}")
+        return JSONResponse(status_code=503, content={
+            'success': False, 'error': 'Similar documents are temporarily unavailable.'
+        })
 
 
 @app.get('/review/new', response_class=HTMLResponse)
@@ -640,22 +602,21 @@ def review_new_post(request: Request, data: SaveCorrectionRequest):
     ocr_text = ocr_results.get('full_text', '')
     cer = compute_cer(ocr_text, corrected) if ocr_text else None
     
-    # Generate text embedding
-    embedding = None
-    try:
-        embedding = embed_text(corrected)
-    except Exception as e:
-        print(f"⚠️  Failed to generate embedding: {e}")
+    # Preserve both source versions and their own embeddings.
+    ocr_embedding = safe_embed_text(ocr_text)
+    embedding = safe_embed_text(corrected)
         
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO documents (image_path, ocr_text, corrected_text, status, version, parent_id, text_embedding, cer)
-        VALUES (%s, %s, %s, 'corrected', 1, NULL, %s, %s)
+        INSERT INTO documents (image_path, ocr_text, corrected_text, status, version, parent_id, ocr_embedding, text_embedding, cer)
+        VALUES (%s, %s, %s, 'corrected', 1, NULL, %s, %s, %s)
         RETURNING id
         """,
-        (filepath, ocr_text, corrected, json.dumps(embedding) if embedding else None, cer)
+        (filepath, ocr_text, corrected,
+         json.dumps(ocr_embedding) if ocr_embedding is not None else None,
+         json.dumps(embedding) if embedding is not None else None, cer)
     )
     doc_id = cur.fetchone()[0]
     conn.commit()
@@ -707,7 +668,7 @@ def review_get(request: Request, doc_id: int):
     
     similar_docs = []
     try:
-        text_for_similarity = corrected_text if corrected_text else ocr_text
+        text_for_similarity = ocr_text
         if text_for_similarity:
             similar_docs = find_similar_documents(
                 current_text=text_for_similarity,
@@ -757,11 +718,7 @@ def review_post(request: Request, doc_id: int, data: SaveCorrectionRequest):
     ocr_text = result[0] or ''
     cer = compute_cer(ocr_text, corrected) if ocr_text else None
     
-    embedding = None
-    try:
-        embedding = embed_text(corrected)
-    except Exception as e:
-        print(f"⚠️  Failed to generate embedding: {e}")
+    embedding = safe_embed_text(corrected)
 
     cur.execute(
         """
@@ -774,7 +731,7 @@ def review_post(request: Request, doc_id: int, data: SaveCorrectionRequest):
             updated_at=NOW()
         WHERE id=%s
         """,
-        (corrected, cer, json.dumps(embedding) if embedding else None, doc_id)
+        (corrected, cer, json.dumps(embedding) if embedding is not None else None, doc_id)
     )
     conn.commit()
     conn.close()
@@ -823,6 +780,7 @@ def correct_ocr(data: CorrectRequest):
                         })
             
             if doc_id:
+                embedding = safe_embed_text(corrected_text)
                 conn = get_db()
                 cur = conn.cursor()
                 try:
@@ -832,9 +790,11 @@ def correct_ocr(data: CorrectRequest):
                 
                 cur.execute(
                     """UPDATE documents 
-                       SET corrected_text = %s, status = 'corrected', cer = %s 
+                       SET corrected_text = %s, status = 'corrected', cer = %s,
+                           text_embedding = %s, updated_at = NOW()
                        WHERE id = %s""",
-                    (corrected_text, cer, doc_id)
+                    (corrected_text, cer,
+                     json.dumps(embedding) if embedding is not None else None, doc_id)
                 )
                 conn.commit()
                 conn.close()

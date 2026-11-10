@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Review & Correct - OCR</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='review_new.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='review_new.css') }}?v=restored">
     <style>
         /* Custom Notification Styles */
         .notification-container {
@@ -795,17 +795,30 @@
             <div class="similar-doc-card">
                 <div class="similar-doc-header">
                     <div class="similar-doc-title">📄 Doc #{{ doc.doc_id }}</div>
-                    <span class="similarity-score">{{ "%.2f"|format(doc.score * 100) }}%</span>
+                    <span class="similarity-score">{{ "%.2f"|format(doc.score * 100) }}% similarity</span>
                 </div>
                 <div class="similar-doc-meta">
                     <span>Version: {{ doc.version }}</span>
                     <span>Status: {{ doc.status.upper() }}</span>
                 </div>
-                <div class="similar-doc-preview">
-                    {{ doc.text[:200] }}{% if doc.text|length > 200 %}...{% endif %}
+                <p class="similar-doc-match">Best match: {{ 'Original OCR' if doc.matched_on == 'raw' else 'Saved Correction' }}{% if doc.similarity_method == 'jaccard' %} (word overlap){% endif %}</p>
+                <div class="similar-doc-texts">
+                    <section class="similar-doc-source">
+                        <h3>Original OCR</h3>
+                        <div class="similar-doc-preview">{{ doc.ocr_text or 'No original OCR available' }}</div>
+                        {% if doc.ocr_text %}
+                        <button class="btn-copy-text" onclick="copyReferenceText(this)" data-text="{{ doc.ocr_text }}">Copy Original OCR</button>
+                        {% endif %}
+                    </section>
+                    <section class="similar-doc-source">
+                        <h3>Saved Correction</h3>
+                        <div class="similar-doc-preview">{{ doc.corrected_text or 'No saved correction' }}</div>
+                        {% if doc.corrected_text %}
+                        <button class="btn-copy-text" onclick="copyReferenceText(this)" data-text="{{ doc.corrected_text }}">Copy Saved Correction</button>
+                        {% endif %}
+                    </section>
                 </div>
                 <div class="similar-doc-actions">
-                    <button class="btn-copy-text" onclick="copyReferenceText(this)" data-text="{{ doc.full_text }}">📋 Copy Text</button>
                     <a href="/review/{{ doc.doc_id }}" class="btn-view-doc">👁️ View</a>
                 </div>
             </div>

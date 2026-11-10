@@ -119,6 +119,7 @@ uploadBox.addEventListener('drop', (e) => {
 // Handle file upload
 async function handleFileUpload(file) {
     hideError();
+    window.clearSimilarDocuments();
     
     const formData = new FormData();
     formData.append('file', file);
@@ -166,6 +167,7 @@ parseBtn.addEventListener('click', async () => {
     
     // Get selected mode
     const selectedMode = document.querySelector('input[name="mode"]:checked').value;
+    window.clearSimilarDocuments();
     
     hideError();
     hideInfo();
@@ -214,6 +216,7 @@ parseBtn.addEventListener('click', async () => {
 // Reprocess OCR button
 if (reprocessBtn) {
     reprocessBtn.addEventListener('click', async () => {
+        window.clearSimilarDocuments();
         if (!currentFilePath) {
             showError('No file selected');
             return;
@@ -269,6 +272,8 @@ if (reprocessBtn) {
 
 // Display results
 function displayResults(data) {
+    resultsPlaceholder.style.display = 'none';
+    loading.style.display = 'none';
     console.log('🎬 displayResults called');
     console.log('OCR Data:', data);
     
@@ -431,6 +436,7 @@ function displayResults(data) {
     
     // Full text
     fullText.value = data.full_text;
+    window.loadSimilarDocuments(data.full_text || '', data.doc_id);
     
     // Show version and CER info if available
     if (data.version || data.cer) {
@@ -505,6 +511,7 @@ copyBtn.addEventListener('click', () => {
 
 // Clear and upload new
 clearBtn.addEventListener('click', async () => {
+    window.clearSimilarDocuments();
     currentFilePath = null;
     fileInput.value = '';
     previewSection.style.display = 'none';

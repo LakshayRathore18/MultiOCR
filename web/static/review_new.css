@@ -539,3 +539,11 @@ textarea:focus {
 .suggestion-badge:active {
     transform: translateY(0);
 }
+
+/* Keep paired references while preserving the original review styling. */
+.similar-doc-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
+.similar-doc-match { font-size: 0.85rem; color: #555; margin: 0 0 12px; }
+.similar-doc-texts { display: grid; gap: 15px; margin-bottom: 15px; }
+.similar-doc-source { min-width: 0; }
+.similar-doc-source h3 { font-size: 0.9rem; margin: 0 0 6px; }
+.similar-doc-source .btn-copy-text { width: 100%; }

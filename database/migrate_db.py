@@ -1,6 +1,5 @@
 """
-Database Migration Script: Add image_hash and parent_id columns
-This script updates the documents table to support hash-based document identity.
+Database migration for document identity and dual OCR/corrected embeddings.
 """
 from database.db import get_db
 import sys
@@ -84,6 +83,11 @@ def migrate_database():
             """)
             print("✓ Column 'text_embedding' added")
         
+        # Keep the legacy text_embedding name for corrected text only.
+        cur.execute("""
+            ALTER TABLE documents ADD COLUMN IF NOT EXISTS ocr_embedding JSONB
+        """)
+
         # Create unique index on image_hash (if not exists)
         cur.execute("""
             SELECT indexname 

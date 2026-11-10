@@ -1,8 +1,9 @@
 """
 Semantic Similarity Search
-Find similar documents based on word-level similarity
+Compare a raw OCR query with both original and corrected document text.
 """
 import numpy as np
+import json
 import re
 from database.db import get_db
 
@@ -61,13 +62,32 @@ def word_similarity(text1: str, text2: str) -> float:
     
     return intersection / union
 
+def _embedding_score(query, stored):
+    """Return no score for missing, malformed, or incompatible vectors."""
+    if query is None or stored is None:
+        return None
+    try:
+        stored = json.loads(stored) if isinstance(stored, str) else stored
+        a = np.asarray(query, dtype=float)
+        b = np.asarray(stored, dtype=float)
+        if (a.ndim != 1 or a.size == 0 or a.shape != b.shape
+                or not np.isfinite(a).all() or not np.isfinite(b).all()
+                or np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0):
+            return None
+        score = cosine_similarity(a, b)
+        return float(np.clip(score, -1.0, 1.0)) if np.isfinite(score) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def find_similar_documents(current_text: str = None, current_embedding: list = None, current_doc_id: int = None, threshold: float = 0.3, limit: int = 5, use_embeddings: bool = True):
     """
-    Find similar documents based on cosine similarity of text embeddings (SentenceTransformer)
-    with a fallback to word-level Jaccard similarity.
+    Rank each document by its stronger raw-OCR/corrected cosine match.
+    Use the stronger Jaccard match only if neither vector can be compared.
+    Both texts are returned together, regardless of which source matched.
     
     Args:
-        current_text: Text of current document
+        current_text: Original raw OCR text of current document
         current_embedding: Embedding vector of current document
         current_doc_id: ID of current document (to exclude from results)
         threshold: Minimum similarity score (0.0 to 1.0)
@@ -77,7 +97,7 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
     Returns:
         List of similar documents with metadata
     """
-    if not current_text:
+    if not current_text or not current_text.strip() or limit <= 0:
         return []
         
     # Generate query embedding if not provided and use_embeddings is True
@@ -91,73 +111,79 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
     conn = get_db()
     cur = conn.cursor()
     
-    # Fetch all documents with text (exclude current document)
-    if current_doc_id:
-        cur.execute("""
-            SELECT id, corrected_text, ocr_text, image_path, cer, status, version, text_embedding
+    try:
+        query = """
+            SELECT id, corrected_text, ocr_text, image_path, cer, status, version,
+                   text_embedding, ocr_embedding
             FROM documents
-            WHERE id != %s
-            ORDER BY updated_at DESC
-            LIMIT 100
-        """, (current_doc_id,))
-    else:
-        cur.execute("""
-            SELECT id, corrected_text, ocr_text, image_path, cer, status, version, text_embedding
-            FROM documents
-            ORDER BY updated_at DESC
-            LIMIT 100
-        """)
-    
-    rows = cur.fetchall()
-    conn.close()
+        """
+        params = ()
+        if current_doc_id is not None:
+            query += " WHERE id != %s"
+            params = (current_doc_id,)
+        query += " ORDER BY updated_at DESC, id DESC LIMIT 100"
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
     
     matches = []
     for row in rows:
-        doc_id, corrected_text, ocr_text, image_path, cer, status, version, text_embedding = row
+        (doc_id, corrected_text, ocr_text, image_path, cer, status, version,
+         text_embedding, ocr_embedding) = row
         
         # Prefer corrected text over OCR text
-        compare_text = corrected_text if corrected_text else ocr_text
+        has_correction = bool(corrected_text and corrected_text.strip())
+        compare_text = corrected_text if has_correction else ocr_text
         
         if not compare_text:
             continue
         
-        score = 0.0
-        used_embedding = False
-        
-        if use_embeddings and current_embedding and text_embedding:
-            try:
-                # Handle potential JSON formats of text_embedding
-                if isinstance(text_embedding, str):
-                    import json
-                    db_emb = json.loads(text_embedding)
-                else:
-                    db_emb = text_embedding
-                
-                if isinstance(db_emb, list) and len(db_emb) > 0:
-                    score = cosine_similarity(current_embedding, db_emb)
-                    used_embedding = True
-            except Exception as e:
-                print(f"⚠️ Error calculating cosine similarity for doc_id {doc_id}: {e}")
-        
-        if not used_embedding:
-            # Fallback to word-level Jaccard similarity
-            score = word_similarity(current_text, compare_text)
+        raw_score = corrected_score = None
+        if use_embeddings:
+            if ocr_text and ocr_text.strip():
+                raw_score = _embedding_score(current_embedding, ocr_embedding)
+            if has_correction:
+                corrected_score = _embedding_score(current_embedding, text_embedding)
+
+        scores = [("raw", raw_score), ("corrected", corrected_score)]
+        valid_scores = [(source, score) for source, score in scores if score is not None]
+        used_embedding = bool(valid_scores)
+        if not valid_scores:
+            raw_score = word_similarity(current_text, ocr_text) if ocr_text and ocr_text.strip() else None
+            corrected_score = word_similarity(current_text, corrected_text) if has_correction else None
+            valid_scores = [(source, score) for source, score in
+                            [("raw", raw_score), ("corrected", corrected_score)]
+                            if score is not None]
+        if not valid_scores:
+            continue
+        # max preserves the first (raw) entry on exact ties.
+        matched_on, score = max(valid_scores, key=lambda item: item[1])
         
         if score >= threshold:
             matches.append({
                 "doc_id": doc_id,
                 "score": round(score, 3),
+                "ocr_text": ocr_text or "",
+                "corrected_text": corrected_text if has_correction else None,
+                "raw_score": round(raw_score, 3) if raw_score is not None else None,
+                "corrected_score": round(corrected_score, 3) if corrected_score is not None else None,
+                "matched_on": matched_on,
                 "text": compare_text[:500] if compare_text else "",  # Preview only
                 "full_text": compare_text,
                 "image_path": image_path,
-                "cer": round(cer, 4) if cer else None,
+                "cer": round(cer, 4) if cer is not None else None,
                 "status": status,
                 "version": version,
-                "has_correction": corrected_text is not None,
-                "similarity_method": "cosine" if used_embedding else "jaccard"
+                "has_correction": has_correction,
+                "similarity_method": "cosine" if used_embedding else "jaccard",
+                "_rank_score": score,
             })
     
     # Sort by similarity score (highest first)
-    matches.sort(key=lambda x: x["score"], reverse=True)
-    
-    return matches[:limit]
+    matches.sort(key=lambda x: (-x["_rank_score"], x["doc_id"]))
+    results = matches[:limit]
+    for match in results:
+        del match["_rank_score"]
+    return results
