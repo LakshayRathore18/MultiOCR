@@ -7,7 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Review & Correct - OCR</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='review_new.css') }}?v=restored">
+    <link rel="stylesheet" href="{{ url_for('static', path='review_new.css') }}?v=document-status">
+    <script src="{{ url_for('static', path='document_status.js') }}?v=document-status"></script>
     <style>
         /* Custom Notification Styles */
         .notification-container {
@@ -115,6 +116,15 @@
         <div class="header">
             <h1>✏️ Review & Correct OCR Output</h1>
             <a href="#" class="btn-back-header" onclick="fetch('/api/clear-session',{method:'POST'}).then(()=>window.location.href='/');return false;">⬅️ Back Home</a>
+        </div>
+        <div class="document-info-box" id="documentStatus" role="status" aria-live="polite">
+            <span>Original OCR</span>
+            {% if corrected_text and corrected_text.strip() %}
+            <span class="document-correction-saved">Correction saved</span>
+            {% elif doc_id == 'new' %}
+            <span>Not saved yet</span>
+            {% endif %}
+            {% if updated_at %}<span>Last edited: {{ updated_at.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
         </div>
         
         <div class="grid">
@@ -343,6 +353,9 @@
             .then(r => r.json())
             .then(data => {
                 console.log('Fix response:', data);
+                if (data.success && data.has_correction) {
+                    window.renderDocumentStatus(document.getElementById('documentStatus'), data);
+                }
                 
                 if (data.corrected_text) {
                     let html = '<h4>✨ Corrected Text:</h4>';
@@ -729,13 +742,7 @@
                         cerDisplay.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                     
-                    // Update status in header if available
-                    if (data.version) {
-                        const headerP = document.querySelector('.header p');
-                        if (headerP) {
-                            headerP.textContent = 'Document ID: {{ doc_id }} | Status: corrected | Version: ' + data.version;
-                        }
-                    }
+                    window.renderDocumentStatus(document.getElementById('documentStatus'), data);
                     
                     saveBtn.disabled = false;
                     saveBtn.textContent = '💾 Save Correction';
@@ -754,38 +761,9 @@
         console.log('=== ALL HANDLERS READY ===');
     </script>
     
-    <!-- Version History Timeline -->
-    {% if version_history and version_history|length > 0 %}
-    <div class="version-history">
-        <h2>🕒 Version History</h2>
-        <div class="version-timeline" id="versionTimeline">
-            {% set reversed_history = version_history|reverse|list %}
-            {% for vh in reversed_history %}
-            <div class="version-item {% if vh[0] == doc_id %}active{% endif %} version-item-display" data-version-index="{{ loop.index0 }}">
-                <div class="version-header">
-                    <div class="version-title">Version {{ vh[1] }}</div>
-                    <div class="version-date">{{ vh[4].strftime('%Y-%m-%d %H:%M') if vh[4] else 'N/A' }}</div>
-                </div>
-                <div class="version-meta">
-                    <span><span class="status-tag {% if vh[2] == 'ocr' %}status-ocr{% else %}status-corrected{% endif %}">{{ vh[2].upper() }}</span></span>
-                    {% if vh[3] is not none %}
-                    <span>CER: <span class="cer-badge">{{ "%.4f"|format(vh[3]) }}</span></span>
-                    {% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% if version_history|length > 2 %}
-        <button id="loadMoreVersions" class="btn-load-more" onclick="loadMoreVersions()">
-            📥 Load More Versions ({{ version_history|length - 2 }} more)
-        </button>
-        {% endif %}
-    </div>
-    {% endif %}
-    
     <!-- Similar Documents Panel -->
     {% if similar_docs and similar_docs|length > 0 %}
-    <div class="version-history" style="margin-top: 20px;">
+    <div class="similar-documents-panel">
         <h2>🔍 Similar Documents (Reference Only)</h2>
         <p style="color: #666; margin-bottom: 20px; font-size: 0.95rem;">
             These documents have similar content. Use them as reference for corrections.
@@ -798,8 +776,7 @@
                     <span class="similarity-score">{{ "%.2f"|format(doc.score * 100) }}% similarity</span>
                 </div>
                 <div class="similar-doc-meta">
-                    <span>Version: {{ doc.version }}</span>
-                    <span>Status: {{ doc.status.upper() }}</span>
+                    <span>{{ 'Correction saved' if doc.corrected_text else 'Original OCR' }}</span>
                 </div>
                 <p class="similar-doc-match">Best match: {{ 'Original OCR' if doc.matched_on == 'raw' else 'Saved Correction' }}{% if doc.similarity_method == 'jaccard' %} (word overlap){% endif %}</p>
                 <div class="similar-doc-texts">
@@ -830,34 +807,6 @@
 </html>
 
 <script>
-// Global function for load more versions
-window.loadMoreVersions = function() {
-    const versionItems = document.querySelectorAll('.version-item-display');
-    const loadMoreBtn = document.getElementById('loadMoreVersions');
-    
-    let visibleCount = 0;
-    for (let item of versionItems) {
-        if (item.classList.contains('show') || window.getComputedStyle(item).display !== 'none') {
-            visibleCount++;
-        }
-    }
-    
-    // Show next 2 versions
-    let showed = 0;
-    for (let i = visibleCount; i < versionItems.length && showed < 2; i++) {
-        versionItems[i].classList.add('show');
-        showed++;
-    }
-    
-    // Hide load more button if all versions are shown
-    if (visibleCount + 2 >= versionItems.length) {
-        loadMoreBtn.style.display = 'none';
-    } else {
-        const remaining = versionItems.length - (visibleCount + 2);
-        loadMoreBtn.textContent = `📥 Load More Versions (${remaining} more)`;
-    }
-};
-
 // Global function for copy reference text
 window.copyReferenceText = function(button) {
     const text = button.getAttribute('data-text');

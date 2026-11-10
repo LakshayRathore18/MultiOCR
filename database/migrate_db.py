@@ -1,124 +1,52 @@
-"""
-Database migration for document identity and dual OCR/corrected embeddings.
-"""
+"""Update the document schema: python -m database.migrate_db."""
 from database.db import get_db
-import sys
+
 
 def migrate_database():
-    """Add image_hash column and create unique index"""
+    """Keep OCR/corrections intact and remove unused legacy metadata.
+
+    Only obsolete columns are dropped. Their names below are retained solely
+    so existing installations can be upgraded. No document rows are deleted.
+    Repeating the migration is safe; all changes commit together.
+    """
     conn = get_db()
     cur = conn.cursor()
-    
     try:
-        print("Starting database migration...")
-
-        # Ensure base 'documents' table exists (create if missing)
+        cur.execute("SET LOCAL lock_timeout = '5s'")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS documents (
                 id SERIAL PRIMARY KEY,
-
                 image_path TEXT NOT NULL,
                 ocr_text TEXT NOT NULL,
                 corrected_text TEXT,
-
                 cer FLOAT,
-
                 status VARCHAR(20) DEFAULT 'ocr',
-                version INTEGER DEFAULT 1,
-
+                ocr_embedding JSONB,
+                text_embedding JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
+            )
         """)
-        print("✓ Ensured base 'documents' table exists")
-
-        # Check if image_hash column exists
         cur.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='documents' AND column_name='image_hash'
+            ALTER TABLE documents
+                ADD COLUMN IF NOT EXISTS ocr_embedding JSONB,
+                ADD COLUMN IF NOT EXISTS text_embedding JSONB,
+                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                DROP COLUMN IF EXISTS image_hash,
+                DROP COLUMN IF EXISTS parent_id,
+                DROP COLUMN IF EXISTS version
         """)
-        
-        if cur.fetchone():
-            print("✓ Column 'image_hash' already exists")
-        else:
-            print("Adding 'image_hash' column...")
-            cur.execute("""
-                ALTER TABLE documents
-                ADD COLUMN image_hash TEXT
-            """)
-            print("✓ Column 'image_hash' added")
-        
-        # Check if parent_id column exists
-        cur.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='documents' AND column_name='parent_id'
-        """)
-        
-        if cur.fetchone():
-            print("✓ Column 'parent_id' already exists")
-        else:
-            print("Adding 'parent_id' column...")
-            cur.execute("""
-                ALTER TABLE documents
-                ADD COLUMN parent_id INTEGER REFERENCES documents(id)
-            """)
-            print("✓ Column 'parent_id' added")
-        
-        # Check if text_embedding column exists
-        cur.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='documents' AND column_name='text_embedding'
-        """)
-        
-        if cur.fetchone():
-            print("✓ Column 'text_embedding' already exists")
-        else:
-            print("Adding 'text_embedding' column...")
-            cur.execute("""
-                ALTER TABLE documents
-                ADD COLUMN text_embedding JSONB
-            """)
-            print("✓ Column 'text_embedding' added")
-        
-        # Keep the legacy text_embedding name for corrected text only.
-        cur.execute("""
-            ALTER TABLE documents ADD COLUMN IF NOT EXISTS ocr_embedding JSONB
-        """)
-
-        # Create unique index on image_hash (if not exists)
-        cur.execute("""
-            SELECT indexname 
-            FROM pg_indexes 
-            WHERE tablename='documents' AND indexname='idx_image_hash'
-        """)
-        
-        if cur.fetchone():
-            print("✓ Index 'idx_image_hash' already exists")
-        else:
-            print("Creating unique index on image_hash...")
-            cur.execute("""
-                CREATE INDEX idx_image_hash ON documents(image_hash)
-            """)
-            print("✓ Index 'idx_image_hash' created")
-        
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_status ON documents(status)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON documents(created_at DESC)")
         conn.commit()
-        print("\n✅ Migration completed successfully!")
-        print("\nNew schema supports:")
-        print("  - Hash-based document identity")
-        print("  - Proper version tracking per document")
-        print("  - Deduplication on upload")
-        print("  - Semantic similarity search (text embeddings)")
-        
-    except Exception as e:
+        print("Migration complete: original OCR, latest correction, embeddings and timestamps retained.")
+    except Exception:
         conn.rollback()
-        print(f"\n❌ Migration failed: {e}")
-        sys.exit(1)
+        raise
     finally:
         cur.close()
         conn.close()
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     migrate_database()

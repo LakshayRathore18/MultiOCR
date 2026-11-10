@@ -68,7 +68,6 @@ def setup_database():
                 
                 -- File information
                 image_path TEXT NOT NULL,
-                image_hash VARCHAR(64),
                 
                 -- OCR results
                 ocr_text TEXT NOT NULL,
@@ -77,9 +76,7 @@ def setup_database():
                 -- Quality metrics
                 cer FLOAT,
                 
-                -- Version control
-                parent_id INTEGER REFERENCES documents(id),
-                version INTEGER DEFAULT 1,
+                -- Review state
                 status VARCHAR(20) DEFAULT 'ocr' CHECK (status IN ('pending', 'ocr', 'corrected', 'reviewed')),
                 
                 -- Similarity search
@@ -97,8 +94,6 @@ def setup_database():
         print("\n🔍 Creating indexes...")
         
         indexes = [
-            ("idx_image_hash", "documents", "image_hash", "Hash-based lookup"),
-            ("idx_parent_id", "documents", "parent_id", "Version tracking"),
             ("idx_status", "documents", "status", "Status filtering"),
             ("idx_created_at", "documents", "created_at DESC", "Time-based sorting"),
         ]
@@ -150,8 +145,7 @@ def setup_database():
         print("✅ Database setup completed successfully!")
         print("="*60)
         print("\n📊 Schema Features:")
-        print("  • Hash-based document deduplication")
-        print("  • Version control (parent-child relationships)")
+        print("  • Original OCR and latest saved correction")
         print("  • CER tracking for accuracy measurement")
         print("  • Status workflow (pending → ocr → corrected → reviewed)")
         print("  • Text embeddings for similarity search")

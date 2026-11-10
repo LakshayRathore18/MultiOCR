@@ -1,221 +1,123 @@
-# 🚀 MultiOCR
+# MultiOCR
 
-**MultiOCR** is a multi-model Optical Character Recognition (OCR) system with **hash-based document identity**, **version control**, and **human-in-the-loop post-correction**.
-It combines multiple OCR engines, applies a voting strategy, and tracks accuracy improvements using **Character Error Rate (CER)**.
+MultiOCR extracts Devanagari manuscript text with PaddleOCR, EasyOCR, and DeepSeek OCR, then lets you review and save corrections. Each saved document keeps its original OCR and latest correction together.
 
----
+## Features
 
-## ✨ Key Features
+- Individual OCR engines and MultiOCR processing with voting/filtering.
+- Dictionary suggestions, learned confusion pairs, and manual correction.
+- Character Error Rate (CER), measuring the difference between original OCR and saved correction.
+- Two document embeddings: original OCR and saved correction.
+- Similar documents shown automatically below the main OCR box, with paired text, independent scrolling and copy actions.
+- Top three references initially, with View more for additional matches.
+- Clear Original OCR, Correction saved, and Last edited information.
 
-* 🔍 **Multi-Model OCR**
-  * PaddleOCR
-  * EasyOCR
-  * DeepSeek OCR (LLM-based via Ollama)
-  * Confidence + similarity-based voting
+## Setup
 
-* 🧬 **Hash-Based Deduplication**
-  * SHA256 image hashing
-  * Instant retrieval for duplicate uploads
-  * Zero redundant processing
+Run these commands from the project directory containing `requirements.txt`:
 
-* 🗂️ **Version Control**
-  * v1: Raw OCR output
-  * v2: Human-corrected text
-  * Parent–child document tracking
+```powershell
+conda create -n multiocr python=3.12 -y
+conda activate multiocr
+pip install -r requirements.txt
+Copy-Item .env.example .env
+```
 
-* 📏 **Accuracy Tracking**
-  * Character Error Rate (CER)
-  * Quantifies correction quality
+Configure PostgreSQL using `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` in `.env`. Use the same environment when running the server and database commands. Do not commit credentials.
 
-* ✍️ **Post-OCR Correction Engine**
-  * 360K+ word dictionary
-  * Learned OCR confusion pairs
-  * Domain-specific vocabulary (Sanskrit)
-  * Auto-fix & suggestion system
+For DeepSeek OCR, start Ollama and install the model used by the project:
 
----
-
-## 📋 Table of Contents
-
-* [Installation](#-installation)
-* [Database Schema](#-database-schema)
-* [Usage Guide](#-usage-guide)
-* [Architecture](#-architecture)
-* [Project Structure](#-project-structure)
-* [Quick Start](#-quick-start)
-
----
-
-## 📦 Installation
-
-### 0. Prerequisites - Install Ollama & DeepSeek OCR
-
-**Install Ollama:**
-
-1. Download Ollama from [https://ollama.ai](https://ollama.ai)
-2. Install and start Ollama
-3. Pull DeepSeek OCR model:
-
-```bash
+```powershell
 ollama pull deepseek-ocr
 ```
 
-✅ Verify installation: `ollama list` should show `deepseek-ocr`
+Create the database for a new installation:
 
-### 1. Clone & Setup Environment
-
-```bash
-git clone <repo-url>
-cd multiocr
-conda create -n multiocr python=3.12 -y
-conda activate multiocr
+```powershell
+python -m database.setup_database
 ```
 
-**Activate the environment:**
+Upgrade an existing installation:
 
-Windows PowerShell: `conda activate multiocr`
-Linux/macOS: `conda activate multiocr`
-
-### 2. Install Dependencies
-
-```bash
-pip install -r requirements.txt
+```powershell
+python -m database.migrate_db
 ```
 
-If you use the launcher scripts, activate the conda environment first so `python` and `pip` resolve to the project environment.
+The migration removes obsolete document metadata while retaining document rows, original text, corrections, embeddings, and timestamps. It can be run again safely.
 
-### 3. Configure Environment
+To generate both embeddings for existing text records:
 
-```bash
-copy .env.example .env
+```powershell
+python -m database.backfill_embeddings
 ```
 
-Edit `.env` - **Only change these two lines:**
+This uses the configured SentenceTransformer model. A model download is needed if it is not cached. The command reports failures and skips updates when source text changes during processing.
 
-```env
-DB_NAME=your_database_name
-DB_PASSWORD=your_postgres_password
+## Run
+
+From the project directory:
+
+```powershell
+python -m uvicorn web.app:app --host 127.0.0.1 --port 5000 --reload
 ```
 
-### 4. Setup Database
+Open http://localhost:5000. You can also run `python app.py` from `web/` using the activated project environment.
 
-```bash
-python src/database/setup_database.py
+## Document flow
+
+1. Upload an image and select an OCR engine.
+2. Parse it to produce fresh original OCR. The draft is held in memory.
+3. A temporary query embedding searches saved documents against both stored text embeddings. References never replace the current output automatically.
+4. Open Review & Correct Text, inspect suggestions, and edit the correction.
+5. Save Correction creates the document row and stores the original OCR, correction, both embeddings, CER, and timestamps.
+6. Later correction saves update the latest correction and its embedding. Original OCR and its embedding stay unchanged.
+
+Re-running OCR starts a fresh draft. Saving that draft creates a separate document. A document keeps the latest correction; earlier correction edits cannot be restored. Auto Fix on an already saved document also persists its generated correction and refreshes its embedding and last-edited time.
+
+## Stored document fields
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Saved document identifier |
+| `image_path` | Uploaded image location |
+| `ocr_text` | Original OCR output |
+| `corrected_text` | Latest saved correction |
+| `ocr_embedding` | Original OCR vector |
+| `text_embedding` | Saved correction vector |
+| `cer` | Original/correction character difference |
+| `status` | Stored workflow state |
+| `created_at` | Initial save time |
+| `updated_at` | Last document update time |
+
+The UI displays save information rather than revision numbers. A saved correction is not an independent guarantee that every word is correct.
+
+## Similar documents
+
+The current raw OCR is compared against both stored vectors. Each document is ranked by its stronger valid cosine match and returned once. If neither stored vector can be compared, the search uses word overlap against both texts. Both original OCR and correction are shown regardless of the matching source.
+
+Search considers the latest 100 saved records, excludes the current saved document, and applies a 0.3 threshold. Home results expand three at a time; review results are limited to five. The default embedding model is `all-MiniLM-L6-v2`.
+
+## Checks
+
+```powershell
+python -m unittest discover -s tests -p "test_dual_embeddings.py"
+node --test tests/test_similar_documents.cjs tests/test_document_status.cjs
 ```
 
-✅ **Done!** Your database is ready with all tables and indexes.
+The focused tests mock OCR models and database access. They do not download models or modify your database.
 
-### 5. Run Application
+## Project structure and documentation
 
-```bash
-python web/app.py
-```
+- `web/`: FastAPI routes, Jinja templates, JavaScript, and CSS.
+- `ocr/`: OCR engines, voting, normalization, and benchmarks.
+- `correction/`: dictionary and correction logic.
+- `similarity/`: embedding generation and dual-text search.
+- `database/`: PostgreSQL setup, migration, and embedding backfill.
+- `utils/`: CER and vocabulary helpers.
+- `tests/`: focused regression checks and OCR diagnostics.
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your browser.
+See [Architecture](ARCHITECTURE.md), [Document flow](COMPLETE_FLOW_DOCUMENTATION.md), [Project structure](PROJECT_STRUCTURE.md), and [Embedding plan](DUAL_EMBEDDING_PLAN.md).
 
----
+## Current limitations
 
-## 🗄️ Database Schema
-
-| Column           | Description                   |
-| ---------------- | ----------------------------- |
-| `image_hash`     | SHA256 hash for deduplication |
-| `ocr_text`       | OCR output (v1)               |
-| `corrected_text` | Human-corrected text (v2)     |
-| `cer`            | Character Error Rate          |
-| `parent_id`      | Version linkage               |
-| `status`         | pending / ocr / corrected     |
-
----
-
-## 📖 Usage Guide
-
-1. **Upload Image**: Click "Upload Image" and select a Devanagari manuscript image
-2. **View Results**: Get OCR results from multiple models:
-   - PaddleOCR (Devanagari)
-   - EasyOCR (Hindi)
-   - DeepSeek OCR (LLM-based)
-3. **Voting Result**: View consolidated text from all models
-4. **Post-Correction**: Apply dictionary-based corrections
-5. **Character Error Rate**: See CER metrics for quality assessment
-6. **Download**: Export results as JSON or save to database
-
----
-
-#### Version Control
-- **v1 (OCR)**: Original OCR output
-- **v2 (Corrected)**: Human-corrected text
-- System tracks both versions and calculates CER (Character Error Rate)
-
-#### Hash-Based Deduplication
-- Each uploaded image gets a unique SHA256 hash
-- Re-uploading the same image returns cached results instantly
----
-
-## 🏗️ Architecture
-
-### System Flow
-
-```
-Upload → Hash Check → OCR (PaddleOCR/EasyOCR/DeepSeek) → Voting → Post-Correction → Store
-```
-
-### Hash-Based Deduplication
-
-- SHA256 hash computed for each uploaded image
-- Duplicate detection prevents re-processing
-- Version tracking (v1: OCR, v2: Corrected)
-
-### OCR Voting
-
-- Confidence-based character selection across models
-- Similarity scoring with difflib
-- Deduplicated final output
-
----
-
-## 📁 Project Structure
-
-```
-multiocr/
-├── web/              # Flask application
-├── ocr/              # OCR engines (PaddleOCR, EasyOCR, DeepSeek)
-├── postOCR/          # Dictionary & correction logic
-├── similarity/       # Embeddings & semantic search
-├── database/         # PostgreSQL models
-├── static/           # CSS and JS assets
-├── templates/        # HTML templates
-├── docs/             # Documentation
-└── scripts/          # Utility scripts
-```
-
----
----
-
-## 🚀 Quick Start
-
-**Prerequisite:** Install [Ollama](https://ollama.ai) and run `ollama pull deepseek-ocr`
-
-```bash
-# 1. Setup
-conda create -n multiocr python=3.12 -y
-conda activate multiocr  # Windows
-pip install -r requirements.txt
-
-# 2. Configure
-copy .env.example .env
-# Edit .env: Set DB_PASSWORD and DB_NAME
-
-# 3. Initialize
-python src/database/setup_database.py
-
-# 4. Run
-python web/app.py
-```
-
-→ Open [http://127.0.0.1:5000](http://127.0.0.1:5000)
-
-
-
-
-
+The active draft is stored in shared process memory. Restarting the server loses unsaved work, and separate users do not yet have isolated draft storage. Original image files remain in `uploads/`.

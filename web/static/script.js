@@ -196,11 +196,6 @@ parseBtn.addEventListener('click', async () => {
         if (ocrData.success) {
             resultsPlaceholder.style.display = 'none';
             
-            // Show info if reused existing
-            if (ocrData.reused_existing) {
-                showInfo(ocrData.message);
-            }
-            
             displayResults(ocrData);
         } else {
             resultsPlaceholder.style.display = 'block';
@@ -222,7 +217,7 @@ if (reprocessBtn) {
             return;
         }
         
-        if (!confirm('⚠️ Re-run OCR on this document? This will create a new version.')) {
+        if (!confirm('Re-run OCR on this image? This starts a fresh OCR draft.')) {
             return;
         }
         
@@ -244,9 +239,7 @@ if (reprocessBtn) {
                 },
                 body: JSON.stringify({ 
                     filepath: currentFilePath,
-                    mode: selectedMode,
-                    image_hash: window.currentImageHash || null,
-                    force_reprocess: true  // Force reprocessing
+                    mode: selectedMode
                 })
             });
             
@@ -256,7 +249,7 @@ if (reprocessBtn) {
             
             if (ocrData.success) {
                 resultsPlaceholder.style.display = 'none';
-                showInfo(`✅ OCR reprocessed! New version ${ocrData.version || ''} created.`);
+                showInfo('OCR finished. Review and save the new output when ready.');
                 displayResults(ocrData);
             } else {
                 resultsPlaceholder.style.display = 'block';
@@ -277,10 +270,10 @@ function displayResults(data) {
     console.log('🎬 displayResults called');
     console.log('OCR Data:', data);
     
-    // Remove any previous version info boxes
-    const oldVersionInfo = document.querySelector('.version-info-box');
-    if (oldVersionInfo) {
-        oldVersionInfo.remove();
+    // Remove the previous save information
+    const oldDocumentInfo = document.querySelector('.document-info-box');
+    if (oldDocumentInfo) {
+        oldDocumentInfo.remove();
     }
     
     // Remove any previous review buttons
@@ -292,18 +285,7 @@ function displayResults(data) {
     // Benchmark stats - adjust based on mode
     let statsHTML = '';
     
-    // Check if this is cached/reused data (no benchmark)
-    if (data.reused_existing && !data.benchmark) {
-        statsHTML = `
-            <div class="stat-card">
-                <h4>📋 Cached Result</h4>
-                <div class="stat-value">v${data.version || 'N/A'}</div>
-                <div class="stat-details">
-                    ${data.status === 'corrected' ? 'Human-verified text' : 'Previous OCR result'}<br>
-                </div>
-            </div>
-        `;
-    } else if (data.benchmark) {
+    if (data.benchmark) {
         // Show benchmark stats for each engine
         const engines = [];
         
@@ -406,8 +388,8 @@ function displayResults(data) {
             const text = typeof item === 'string' ? item : item.text;
             const confidence = typeof item === 'object' && item.confidence !== undefined ? item.confidence : null;
             
-            // Only show confidence if NOT a reused/cached result
-            if (confidence !== null && !data.reused_existing) {
+            // Show confidence when the engine supplies a score.
+            if (confidence !== null) {
                 const confidencePercent = (confidence * 100).toFixed(1);
                 let confidenceClass = 'confidence-low';
                 if (confidence >= 0.8) confidenceClass = 'confidence-high';
@@ -422,7 +404,7 @@ function displayResults(data) {
                     </div>
                 `;
             } else {
-                // Cached/corrected text or no confidence score - show simple text only
+                // No confidence score is available for this line.
                 return `
                     <div class="text-line">
                         <div class="text-content">${escapeHtml(text)}</div>
@@ -438,43 +420,12 @@ function displayResults(data) {
     fullText.value = data.full_text;
     window.loadSimilarDocuments(data.full_text || '', data.doc_id);
     
-    // Show version and CER info if available
-    if (data.version || data.cer) {
-        const versionInfo = document.createElement('div');
-        versionInfo.className = 'version-info-box';
-        versionInfo.style.cssText = 'background: #e3f2fd; padding: 12px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #2196F3;';
-        
-        let infoHTML = '<div style="display: flex; justify-content: space-between; align-items: center;">';
-        
-        if (data.version) {
-            infoHTML += `<span style="font-weight: 600; color: #1976d2;">📌 Version ${data.version}</span>`;
-        }
-        
-        if (data.cer !== undefined && data.cer !== null) {
-            const cerPercent = (data.cer * 100).toFixed(2);
-            let cerColor = '#4caf50';
-            if (data.cer > 0.15) cerColor = '#ff9800';
-            if (data.cer > 0.30) cerColor = '#f44336';
-            infoHTML += `<span style="color: ${cerColor}; font-weight: 600;">📊 CER: ${cerPercent}%</span>`;
-        }
-        
-        if (data.is_reprocess) {
-            infoHTML += '<span style="color: #9c27b0; font-weight: 600;">🔄 Reprocessed</span>';
-        }
-        
-        if (data.reused_existing) {
-            infoHTML += '<span style="color: #4caf50; font-weight: 600;">✓ Verified</span>';
-        }
-        
-        infoHTML += '</div>';
-        versionInfo.innerHTML = infoHTML;
-        
-        const fullTextArea = document.querySelector('.full-text-area');
-        if (fullTextArea && !document.querySelector('.version-info-box')) {
-            fullTextArea.insertAdjacentElement('beforebegin', versionInfo);
-        }
-    }
-    
+    const documentInfo = document.createElement('div');
+    documentInfo.className = 'document-info-box';
+    documentInfo.setAttribute('role', 'status');
+    window.renderDocumentStatus(documentInfo, data);
+    document.querySelector('.full-text-area').insertAdjacentElement('beforebegin', documentInfo);
+
     // Always add "Review & Correct" button if we have text results
     const reviewBtn = document.createElement('button');
     reviewBtn.className = 'btn btn-success btn-block review-btn';
@@ -782,7 +733,7 @@ function acceptAndSaveCorrection() {
         return;
     }
     
-    // Update the full text with corrected version
+    // Update the correction preview
     fullText.value = correctedTextValue;
     
     // Hide correction section

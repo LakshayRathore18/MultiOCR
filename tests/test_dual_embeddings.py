@@ -4,6 +4,7 @@ import json
 import sys
 import types
 import unittest
+from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -11,15 +12,17 @@ from unittest.mock import Mock, patch
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from database import backfill_embeddings as backfill
+from database import migrate_db
 from similarity import embeddings, search
 
 
 ROOT = Path(__file__).resolve().parents[1]
+EDIT_TIME = datetime(2026, 11, 10, 12, 30)
 
 
 def document(doc_id=1, raw="old raw", corrected="old correction",
              raw_vector=None, corrected_vector=None):
-    return (doc_id, corrected, raw, "uploads/example.png", 0.0, "corrected", 2,
+    return (doc_id, corrected, raw, "uploads/example.png", 0.0, "corrected", EDIT_TIME,
             corrected_vector, raw_vector)
 
 
@@ -132,13 +135,20 @@ class SaveTests(unittest.TestCase):
         self.data = self.app.SaveCorrectionRequest(corrected_text="saved correction")
 
     def test_new_save_pairs_both_vectors_with_original_and_correction(self):
-        self.cur.fetchone.return_value = (42,)
+        self.cur.fetchone.return_value = (42, EDIT_TIME)
         with patch.dict(self.app.TEMP_SESSION_STORE, {
             "current_filepath": "uploads/example.png",
             "current_ocr_results": {"full_text": "original OCR"},
         }), patch.object(self.app, "safe_embed_text", side_effect=[[1, 0], [0, 1]]) as embed:
             result = self.app.review_new_post(self.request, self.data)
+            restored = self.app.TEMP_SESSION_STORE['current_ocr_results']
+            self.assertEqual(restored['full_text'], 'original OCR')
+            self.assertTrue(restored['has_correction'])
+            self.assertEqual(restored['updated_at'], EDIT_TIME.isoformat())
         self.assertEqual(result["doc_id"], 42)
+        self.assertTrue(result['has_correction'])
+        self.assertEqual(result['status'], 'corrected')
+        self.assertEqual(result['updated_at'], EDIT_TIME.isoformat())
         self.assertEqual([c.args[0] for c in embed.call_args_list], ["original OCR", "saved correction"])
         params = self.cur.execute.call_args.args[1]
         self.assertEqual(params[1:3], ("original OCR", "saved correction"))
@@ -148,9 +158,11 @@ class SaveTests(unittest.TestCase):
     def test_manual_edit_refreshes_correction_only_and_failure_clears_vector(self):
         for vector in ([0, 1], None):
             with self.subTest(vector=vector):
-                self.cur.fetchone.return_value = ("original OCR",)
+                self.cur.fetchone.side_effect = [("original OCR",), (EDIT_TIME,)]
                 with patch.object(self.app, "safe_embed_text", return_value=vector) as embed:
-                    self.app.review_post(self.request, 42, self.data)
+                    result = self.app.review_post(self.request, 42, self.data)
+                self.assertEqual(result['updated_at'], EDIT_TIME.isoformat())
+                self.assertTrue(result['has_correction'])
                 embed.assert_called_once_with("saved correction")
                 sql, params = self.cur.execute.call_args.args
                 self.assertNotIn("ocr_embedding", sql)
@@ -158,6 +170,7 @@ class SaveTests(unittest.TestCase):
                 self.assertEqual(params[2], json.dumps(vector) if vector is not None else None)
 
     def test_auto_correction_refreshes_embedding_without_changing_raw(self):
+        self.cur.fetchone.return_value = (EDIT_TIME,)
         integration = types.ModuleType("postocr_integration")
         integration.correct_text = Mock(return_value={"success": True, "corrected_text": "auto correction"})
         for vector in ([0, 1], None):
@@ -165,6 +178,7 @@ class SaveTests(unittest.TestCase):
                     patch.object(self.app, "safe_embed_text", return_value=vector) as embed:
                 result = self.app.correct_ocr(self.app.CorrectRequest(text="edited input", doc_id=42))
                 self.assertTrue(result["success"])
+                self.assertEqual(result['updated_at'], EDIT_TIME.isoformat())
                 embed.assert_called_once_with("auto correction")
                 sql, params = self.cur.execute.call_args.args
                 self.assertIn("text_embedding = %s", sql)
@@ -173,19 +187,41 @@ class SaveTests(unittest.TestCase):
 
     def test_existing_review_search_uses_original_even_when_corrected(self):
         self.cur.fetchone.return_value = ("uploads/example.png", "original OCR", "saved correction",
-                                         0.0, "corrected", 2, None, None)
+                                         0.0, "corrected", EDIT_TIME)
         with patch.object(self.app, "find_similar_documents", return_value=[]) as find, \
                 patch.object(self.app.templates, "TemplateResponse"):
             self.app.review_get(self.request, 42)
         self.assertEqual(find.call_args.kwargs["current_text"], "original OCR")
+
+    def test_edit_metadata_updates_only_the_matching_active_draft(self):
+        with patch.dict(self.app.TEMP_SESSION_STORE, {
+            'current_doc_id': 42, 'current_status': 'processed',
+            'current_ocr_results': {'full_text': 'original OCR'},
+        }):
+            self.app.saved_correction_metadata(7, EDIT_TIME, 0.1)
+            self.assertEqual(self.app.TEMP_SESSION_STORE['current_status'], 'processed')
+            self.app.saved_correction_metadata(42, EDIT_TIME, 0)
+            restored = self.app.get_session_data(self.request)['ocr_results']
+            self.assertEqual(restored['full_text'], 'original OCR')
+            self.assertTrue(restored['has_correction'])
+            self.assertEqual(restored['updated_at'], EDIT_TIME.isoformat())
+            self.assertEqual(restored['cer'], 0)
+
+    def test_auto_fix_missing_document_does_not_claim_a_save(self):
+        integration = types.ModuleType('postocr_integration')
+        integration.correct_text = Mock(return_value={'success': True, 'corrected_text': 'fixed'})
+        self.cur.fetchone.return_value = None
+        with patch.dict(sys.modules, {'postocr_integration': integration}), \
+                patch.object(self.app, 'safe_embed_text', return_value=[1, 0]):
+            result = self.app.correct_ocr(self.app.CorrectRequest(text='raw', doc_id=404))
+        self.assertEqual(result.status_code, 404)
+        self.conn.commit.assert_not_called()
 
     def test_new_ocr_is_preserved_and_previous_correction_is_reference_only(self):
         raw = "the studcnt reads"
         corrected = "the student reads"
         reference = dict(doc_id=42, ocr_text=raw, corrected_text=corrected)
         # This stored correction would pass the former 85% replacement rule.
-        self.cur.fetchall.return_value = [(42, raw, corrected, "corrected", 2,
-                                          "uploads/old.png", 0.01)]
         benchmark = dict(results=[dict(text=raw, confidence=0.8)],
                          time_sec=0.1, lines=1, avg_confidence=0.8)
         for mode, model_name in (("paddleocr", "paddle_model"),
@@ -194,7 +230,7 @@ class SaveTests(unittest.TestCase):
             with self.subTest(mode=mode), \
                     patch.dict(self.app.TEMP_SESSION_STORE, {
                         "current_doc_id": 42, "current_status": "corrected",
-                        "current_ocr_results": {"full_text": corrected, "reused_existing": True},
+                        "current_ocr_results": {"full_text": corrected},
                     }), patch.object(self.app.os.path, "exists", return_value=True), \
                     patch.object(self.app, model_name, object()), \
                     patch.object(self.app, "benchmark_ocr", return_value=benchmark), \
@@ -208,7 +244,9 @@ class SaveTests(unittest.TestCase):
                 self.assertEqual(result["full_text"], raw)
                 self.assertEqual(result["text"][0]["text"], raw)
                 self.assertEqual(result["text"][0]["confidence"], 0.8)
-                self.assertFalse(result["reused_existing"])
+                self.assertEqual(result['status'], 'ocr')
+                self.assertFalse(result['has_correction'])
+                self.assertIsNone(result['updated_at'])
                 self.assertIsNone(result["doc_id"])
                 self.assertNotIn("cer", result)
                 self.assertIsNone(self.app.TEMP_SESSION_STORE["current_doc_id"])
@@ -253,6 +291,20 @@ class ButtonParser(HTMLParser):
 
 
 class DisplayTests(unittest.TestCase):
+    def test_review_displays_real_save_information(self):
+        env = Environment(loader=FileSystemLoader(ROOT / 'web/templates'), autoescape=select_autoescape())
+        template = env.get_template('review_new.html')
+        for saved in (None, 'saved correction'):
+            html = template.render(url_for=lambda *a, **k: '/static/example',
+                                   doc_id='new' if saved is None else 42, image_path='example.png',
+                                   ocr_text='original', corrected_text=saved, cer=None,
+                                   updated_at=EDIT_TIME if saved else None, similar_docs=[])
+            if saved:
+                self.assertIn('Correction saved', html)
+                self.assertIn('Last edited: 2026-11-10 12:30', html)
+            else:
+                self.assertIn('Not saved yet', html)
+
     def test_home_template_places_references_after_output(self):
         env = Environment(loader=FileSystemLoader(ROOT / "web/templates"), autoescape=select_autoescape())
         html = env.get_template("index.html").render(url_for=lambda name, path: f"/static/{path}")
@@ -291,11 +343,11 @@ class DisplayTests(unittest.TestCase):
         for source in ("raw", "corrected"):
             for saved in (corrected, None):
                 with self.subTest(source=source, saved=saved):
-                    doc = dict(doc_id=42, score=0.9, version=2, status="corrected", matched_on=source,
+                    doc = dict(doc_id=42, score=0.9, status="corrected", matched_on=source,
                                similarity_method="cosine", ocr_text=raw, corrected_text=saved)
                     html = template.render(url_for=lambda *a, **k: "/static/review_new.css",
                                            doc_id="new", image_path="example.png", ocr_text="current",
-                                           corrected_text=None, cer=None, version_history=[], similar_docs=[doc])
+                                           corrected_text=None, cer=None, updated_at=None, similar_docs=[doc])
                     panel = html.split("<!-- Similar Documents Panel -->")[1]
                     self.assertIn("Original OCR</h3>", panel)
                     self.assertIn("Saved Correction</h3>", panel)
@@ -306,6 +358,31 @@ class DisplayTests(unittest.TestCase):
                     self.assertEqual(parser.copy_texts, [raw, saved] if saved else [raw])
                     if not saved:
                         self.assertIn("No saved correction", panel)
+
+
+class MigrationTests(unittest.TestCase):
+    def test_migration_commits_schema_changes_without_deleting_documents(self):
+        conn = Mock()
+        with patch.object(migrate_db, 'get_db', return_value=conn):
+            migrate_db.migrate_database()
+        sql = '\n'.join(call.args[0] for call in conn.cursor.return_value.execute.call_args_list)
+        self.assertIn('DROP COLUMN IF EXISTS', sql)
+        self.assertIn('ADD COLUMN IF NOT EXISTS ocr_embedding', sql)
+        self.assertNotIn('DELETE FROM', sql)
+        self.assertNotIn('CASCADE', sql)
+        conn.commit.assert_called_once()
+        conn.cursor.return_value.close.assert_called_once()
+        conn.close.assert_called_once()
+
+    def test_failed_cleanup_rolls_back_and_closes_connection(self):
+        conn = Mock()
+        conn.cursor.return_value.execute.side_effect = RuntimeError('dependency prevents cleanup')
+        with patch.object(migrate_db, 'get_db', return_value=conn):
+            with self.assertRaises(RuntimeError):
+                migrate_db.migrate_database()
+        conn.rollback.assert_called_once()
+        conn.commit.assert_not_called()
+        conn.close.assert_called_once()
 
 
 class BackfillTests(unittest.TestCase):

@@ -902,6 +902,22 @@ header p {
 }
 
 /* Home-page reference results: original OCR and its saved correction. */
+.document-info-box {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+    background: #e3f2fd;
+    color: #1976d2;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 12px;
+    margin: 15px 0;
+    border-left: 4px solid #2196f3;
+    border-radius: 8px;
+}
+.document-correction-saved { color: #2e7d32; }
+
 .home-similar-documents {
     margin-top: 25px;
     padding: 30px;

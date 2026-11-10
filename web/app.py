@@ -120,8 +120,6 @@ app.mount("/static", StaticFiles(directory=os.path.join(web_dir, 'static')), nam
 class ProcessRequest(BaseModel):
     filepath: str
     mode: str = 'paddleocr'
-    image_hash: Optional[str] = None
-    force_reprocess: bool = False
 
 
 class CorrectRequest(BaseModel):
@@ -164,9 +162,9 @@ def compact_results_for_session(results):
         'text': results.get('text'),
         'full_text': results.get('full_text'),
         'doc_id': results.get('doc_id'),
-        'version': results.get('version'),
-        'is_reprocess': results.get('is_reprocess'),
-        'reused_existing': results.get('reused_existing'),
+        'status': results.get('status'),
+        'has_correction': results.get('has_correction', False),
+        'updated_at': results.get('updated_at'),
         'message': results.get('message'),
         'cer': results.get('cer')
     }
@@ -188,10 +186,25 @@ TEMP_SESSION_STORE = {
     'current_doc_id': None,
     'current_filename': None,
     'current_filepath': None,
-    'current_image_hash': None,
     'current_status': None,
     'current_ocr_results': None
 }
+
+
+def saved_correction_metadata(doc_id, updated_at, cer):
+    """Keep restored OCR output paired with the latest save information."""
+    metadata = {
+        'status': 'corrected',
+        'has_correction': True,
+        'updated_at': updated_at.isoformat() if updated_at else None,
+        'cer': round(cer, 4) if cer is not None else None,
+    }
+    if TEMP_SESSION_STORE.get('current_doc_id') == doc_id:
+        TEMP_SESSION_STORE['current_status'] = 'corrected'
+        results = TEMP_SESSION_STORE.get('current_ocr_results')
+        if isinstance(results, dict):
+            results.update(metadata, doc_id=doc_id)
+    return metadata
 
 
 # ----------------------------------------------------
@@ -223,7 +236,6 @@ def clear_session(request: Request):
     TEMP_SESSION_STORE['current_doc_id'] = None
     TEMP_SESSION_STORE['current_filename'] = None
     TEMP_SESSION_STORE['current_filepath'] = None
-    TEMP_SESSION_STORE['current_image_hash'] = None
     TEMP_SESSION_STORE['current_status'] = None
     TEMP_SESSION_STORE['current_ocr_results'] = None
     return {'success': True, 'message': 'Session cleared successfully'}
@@ -277,7 +289,6 @@ def process_ocr(request: Request, data: ProcessRequest):
     """Run OCR pipeline concurrently using ThreadPoolExecutor"""
     filepath = data.filepath
     mode = data.mode
-    image_hash = data.image_hash
     
     # Resolve absolute path for processing
     abs_filepath = filepath
@@ -470,13 +481,12 @@ def process_ocr(request: Request, data: ProcessRequest):
         # Save to the database only when the user saves their reviewed text.
         TEMP_SESSION_STORE['current_doc_id'] = None
         TEMP_SESSION_STORE['current_filepath'] = filepath
-        TEMP_SESSION_STORE['current_image_hash'] = image_hash
         TEMP_SESSION_STORE['current_status'] = 'processed'
         
         results['doc_id'] = None
-        results['reused_existing'] = False
-        results['version'] = 1
-        results['is_reprocess'] = False
+        results['status'] = 'ocr'
+        results['has_correction'] = False
+        results['updated_at'] = None
         
         TEMP_SESSION_STORE['current_ocr_results'] = results
         
@@ -492,7 +502,7 @@ def reprocess_ocr(doc_id: int):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        """SELECT image_path, image_hash, corrected_text 
+        """SELECT image_path, corrected_text
            FROM documents WHERE id=%s""",
         (doc_id,)
     )
@@ -502,7 +512,7 @@ def reprocess_ocr(doc_id: int):
     if not result:
         return JSONResponse(status_code=404, content={'error': 'Document not found'})
     
-    image_path, image_hash, corrected_text = result
+    image_path, corrected_text = result
     
     abs_filepath = image_path
     if not os.path.isabs(image_path):
@@ -513,9 +523,8 @@ def reprocess_ocr(doc_id: int):
     
     return {
         'success': True,
-        'message': 'Reprocessing initiated. Please call /process with force_reprocess=true',
+        'message': 'Run /process with this filepath and the selected OCR mode.',
         'filepath': image_path,
-        'image_hash': image_hash,
         'has_correction': corrected_text is not None
     }
 
@@ -552,8 +561,7 @@ def review_new_get(request: Request):
     corrected_text = None
     cer = None
     status = 'ocr'
-    version = 1
-    version_history = []
+    updated_at = None
     similar_docs = []
     
     # Find similar documents for correction suggestion references
@@ -578,8 +586,7 @@ def review_new_get(request: Request):
             "corrected_text": corrected_text,
             "cer": cer,
             "status": status,
-            "version": version,
-            "version_history": version_history,
+            "updated_at": updated_at,
             "similar_docs": similar_docs
         }
     )
@@ -602,7 +609,7 @@ def review_new_post(request: Request, data: SaveCorrectionRequest):
     ocr_text = ocr_results.get('full_text', '')
     cer = compute_cer(ocr_text, corrected) if ocr_text else None
     
-    # Preserve both source versions and their own embeddings.
+    # Preserve the original OCR and correction with their own embeddings.
     ocr_embedding = safe_embed_text(ocr_text)
     embedding = safe_embed_text(corrected)
         
@@ -610,29 +617,26 @@ def review_new_post(request: Request, data: SaveCorrectionRequest):
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO documents (image_path, ocr_text, corrected_text, status, version, parent_id, ocr_embedding, text_embedding, cer)
-        VALUES (%s, %s, %s, 'corrected', 1, NULL, %s, %s, %s)
-        RETURNING id
+        INSERT INTO documents (image_path, ocr_text, corrected_text, status, ocr_embedding, text_embedding, cer)
+        VALUES (%s, %s, %s, 'corrected', %s, %s, %s)
+        RETURNING id, updated_at
         """,
         (filepath, ocr_text, corrected,
          json.dumps(ocr_embedding) if ocr_embedding is not None else None,
          json.dumps(embedding) if embedding is not None else None, cer)
     )
-    doc_id = cur.fetchone()[0]
+    doc_id, updated_at = cur.fetchone()
     conn.commit()
     conn.close()
     
     # Update session variables
     TEMP_SESSION_STORE['current_doc_id'] = doc_id
-    TEMP_SESSION_STORE['current_status'] = 'corrected'
-    if isinstance(TEMP_SESSION_STORE.get('current_ocr_results'), dict):
-        TEMP_SESSION_STORE['current_ocr_results']['doc_id'] = doc_id
+    metadata = saved_correction_metadata(doc_id, updated_at, cer)
         
     return {
         'success': True,
         'doc_id': doc_id,
-        'cer': cer,
-        'version': 1,
+        **metadata,
         'message': '✓ Document draft saved and corrections applied successfully!'
     }
 
@@ -643,7 +647,7 @@ def review_get(request: Request, doc_id: int):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        """SELECT image_path, ocr_text, corrected_text, cer, status, version, image_hash, parent_id 
+        """SELECT image_path, ocr_text, corrected_text, cer, status, updated_at
            FROM documents WHERE id=%s""",
         (doc_id,)
     )
@@ -653,18 +657,7 @@ def review_get(request: Request, doc_id: int):
         conn.close()
         return HTMLResponse("Document not found", status_code=404)
         
-    image_path, ocr_text, corrected_text, cer, status, version, image_hash, parent_id = result
-    
-    version_history = []
-    if image_hash:
-        cur.execute(
-            """SELECT id, version, status, cer, created_at, updated_at
-               FROM documents 
-               WHERE image_hash = %s 
-               ORDER BY version ASC""",
-            (image_hash,)
-        )
-        version_history = cur.fetchall()
+    image_path, ocr_text, corrected_text, cer, status, updated_at = result
     
     similar_docs = []
     try:
@@ -691,8 +684,7 @@ def review_get(request: Request, doc_id: int):
             "corrected_text": corrected_text,
             "cer": cer,
             "status": status,
-            "version": version,
-            "version_history": version_history,
+            "updated_at": updated_at,
             "similar_docs": similar_docs
         }
     )
@@ -726,13 +718,14 @@ def review_post(request: Request, doc_id: int, data: SaveCorrectionRequest):
         SET corrected_text=%s,
             cer=%s,
             status='corrected',
-            version=2,
             text_embedding=%s,
             updated_at=NOW()
         WHERE id=%s
+        RETURNING updated_at
         """,
         (corrected, cer, json.dumps(embedding) if embedding is not None else None, doc_id)
     )
+    updated_at = cur.fetchone()[0]
     conn.commit()
     conn.close()
     
@@ -741,14 +734,12 @@ def review_post(request: Request, doc_id: int, data: SaveCorrectionRequest):
     session.pop('current_doc_id', None)
     session.pop('current_filename', None)
     session.pop('current_filepath', None)
-    session.pop('current_image_hash', None)
     session.pop('current_status', None)
 
     return {
         'success': True,
         'message': f'Saved successfully! Character Error Rate: {cer:.4f}' if cer is not None else 'Saved successfully!',
-        'cer': round(cer, 4) if cer is not None else None,
-        'version': 2
+        **saved_correction_metadata(doc_id, updated_at, cer),
     }
 
 
@@ -792,10 +783,15 @@ def correct_ocr(data: CorrectRequest):
                     """UPDATE documents 
                        SET corrected_text = %s, status = 'corrected', cer = %s,
                            text_embedding = %s, updated_at = NOW()
-                       WHERE id = %s""",
+                       WHERE id = %s RETURNING updated_at""",
                     (corrected_text, cer,
                      json.dumps(embedding) if embedding is not None else None, doc_id)
                 )
+                saved = cur.fetchone()
+                if not saved:
+                    conn.close()
+                    return JSONResponse(status_code=404, content={'error': 'Document not found'})
+                updated_at = saved[0]
                 conn.commit()
                 conn.close()
                 
@@ -804,7 +800,7 @@ def correct_ocr(data: CorrectRequest):
                     'corrected_text': corrected_text,
                     'corrections': corrections,
                     'errors_found': result.get('errors_found', len(corrections)),
-                    'cer': round(cer, 4),
+                    **saved_correction_metadata(doc_id, updated_at, cer),
                     'doc_id': doc_id
                 }
             else:

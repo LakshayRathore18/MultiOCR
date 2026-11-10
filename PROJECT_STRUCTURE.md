@@ -1,191 +1,63 @@
-# Project Structure Documentation
+# Project structure
 
-This document explains the purpose of each folder and file in the MultiOCR project.
+Paths below are relative to the application directory containing `requirements.txt`.
 
-## Root Level Files
+| Path | Purpose |
+| --- | --- |
+| `web/app.py` | FastAPI routes, active drafts, review/save orchestration |
+| `web/templates/index.html` | Upload, OCR output, and home reference cards |
+| `web/templates/review_new.html` | Original image/text, correction tools, and saved references |
+| `web/static/style.css` | Home styling |
+| `web/static/review_new.css` | Review styling |
+| `web/static/script.js` | Upload and OCR processing interactions |
+| `web/static/document_status.js` | Original OCR, saved correction, and last-edited display |
+| `web/static/similar_documents.js` | Paired reference cards, copy, loading/retry, and expansion |
+| `ocr/paddle_ocr.py` | PaddleOCR adapter |
+| `ocr/easy_ocr.py` | EasyOCR adapter |
+| `ocr/deepseek_ocr.py` | Ollama-backed DeepSeek adapter |
+| `ocr/voting.py` | Combine OCR results |
+| `ocr/benchmark.py` | Processing measurements |
+| `ocr/normalize.py` | Normalize and validate text |
+| `ocr/devanagari_unicode.py` | Devanagari checks |
+| `correction/` | Dictionary, trie, edit distance, confusion-pair logic, and tests |
+| `postocr_integration.py` | Connect correction logic with web routes |
+| `similarity/embeddings.py` | Lazy model loading and text encoding |
+| `similarity/search.py` | Compare raw queries with both stored text vectors |
+| `database/db.py` | PostgreSQL connection configuration |
+| `database/setup_database.py` | Create a new database and schema |
+| `database/migrate_db.py` | Upgrade existing schema and remove unused metadata |
+| `database/backfill_embeddings.py` | Rebuild both vectors from stored source text |
+| `utils/cer.py` | Character Error Rate |
+| `utils/build_vocab.py` | Vocabulary helper |
+| `scripts/` | Database diagnostics and data import/export helpers |
+| `deployment/OCR_pipeline.py` | Standalone OCR pipeline |
+| `start.ps1` | Start the web server using the active environment |
+| `tests/test_dual_embeddings.py` | Save, search, schema, and template regressions |
+| `tests/test_similar_documents.cjs` | Browser reference interaction tests |
+| `tests/test_document_status.cjs` | Save-information rendering tests |
+| `archived/` | Historical scraping and voting experiments |
 
-### Configuration Files
-- **`.env`** - Environment variables for local development (API keys, database URLs, model paths)
-- **`.env.example`** - Template for environment variables (should be committed to git)
-- **`.gitignore`** - Specifies files/directories to ignore in git (venv, uploads, logs, etc.)
-- **`requirements.txt`** - Python dependencies for the project
+## Configuration and generated files
 
-### Documentation
-- **`README.md`** - Project overview, installation instructions, and basic usage
-- **`ARCHITECTURE.md`** - High-level architecture documentation
-- **`COMPLETE_FLOW_DOCUMENTATION.md`** - Detailed workflow documentation
-- **`PROJECT_STRUCTURE.md`** - This file - project structure documentation
+- `.env.example` documents environment variables; put local credentials in `.env`.
+- `requirements.txt` lists dependencies.
+- `uploads/` stores images; `logs/` contains runtime logs.
+- Python environments and bytecode caches are generated local files.
+- The active draft is held in server process memory, while saved text lives in PostgreSQL.
 
-### Integration Files
-- **`postocr_integration.py`** - Main integration point for correction module (bridges OCR results with text correction)
+## Imports
 
-### Startup Scripts
-- **`start.ps1`** - PowerShell script to start the web application
+Use root-package imports:
 
----
+```python
+from database.db import get_db
+from utils.cer import compute_cer
+from similarity.search import find_similar_documents
+```
 
-## `/multiocr/` Directory
+## Other guides
 
-### `/ocr/` - OCR Engine Implementations
-**Purpose**: Contains different OCR engine implementations and utilities
-
-- **`paddle_ocr.py`** - PaddleOCR engine wrapper (fast, good for Devanagari)
-- **`easy_ocr.py`** - EasyOCR engine wrapper (multi-language support)
-- **`deepseek_ocr.py`** - DeepSeek OCR engine wrapper (AI-based OCR)
-- **`voting.py`** - Voting mechanism to combine results from multiple OCR engines
-- **`benchmark.py`** - Benchmarking utility to measure OCR performance (time, confidence)
-- **`normalize.py`** - Text normalization utilities for OCR output
-- **`devanagari_unicode.py`** - Devanagari-specific Unicode handling and validation
-
-### `/correction/` - Text Correction Module
-**Purpose**: Text correction module using learned confusion pairs and dictionary
-
-- **`corrector.py`** - Main text correction engine using trie-based dictionary matching
-- **`confusion_pairs.py`** - Manages learned OCR error patterns (e.g., '0' -> 'O')
-- **`dictionary.py`** - Dictionary management for valid word lookup
-- **`edit_distance.py`** - Levenshtein distance calculation for similarity
-- **`lcs.py`** - Longest Common Subsequence algorithm for text alignment
-- **`file_handler.py`** - File I/O utilities for correction module
-
-#### `/correction/data/` - Dictionary Data
-**Purpose**: Stores dictionary data and learned corrections
-
-#### `/correction/tests/` - Correction Tests
-**Purpose**: Unit tests for correction module
-
-### `/database/` - Database Management
-**Purpose**: Database connection and schema management
-
-- **`db.py`** - Database connection utilities
-- **`setup_database.py`** - Database schema creation and initialization
-- **`migrate_db.py`** - Database migration scripts
-
-### `/utils/` - Utility Functions
-**Purpose**: Shared utility functions
-
-- **`cer.py`** - Character Error Rate calculation
-- **`image_hash.py`** - Image hashing for duplicate detection
-- **`build_vocab.py`** - Vocabulary building for ML models
-
-### `/similarity/` - Semantic Search
-**Purpose**: Document similarity search using embeddings
-
-- **`embeddings.py`** - Text embedding generation (for semantic similarity)
-- **`search.py`** - Similar document search functionality
-
-### `/web/` - Web Application
-**Purpose**: Flask web interface for OCR processing
-
-#### `/web/app.py` - Main Flask Application
-- Routes for upload, processing, review, correction
-- Session management
-- Database integration
-
-#### `/web/templates/` - HTML Templates
-- **`index.html`** - Main upload and processing interface
-- **`review_new.html`** - Human-in-the-loop review interface for corrections
-
-#### `/web/static/` - Static Assets
-- **`style.css`** - Main stylesheet for index.html
-- **`review_new.css`** - Stylesheet for review interface
-- **`script.js`** - Frontend JavaScript for upload, processing, and correction
-
-### `/scripts/` - Utility Scripts
-**Purpose**: Maintenance and utility scripts
-
-- **`check_db.py`** - Database health check script
-- **`convert_parquet_to_json.py`** - Convert parquet data to JSON format
-- **`export_train_json.py`** - Export training data to JSON
-- **`fix_keys.py`** - Fix database keys/data issues
-- **`install_similarity.bat`** - Install similarity search dependencies
-
-### `/deployment/` - Deployment Files
-**Purpose**: Deployment-related scripts and configurations
-
-- **`OCR_pipeline.py`** - OCR pipeline for deployment
-- **`start.ps1`** - PowerShell startup script
-
-### `/tests/` - Test Suite
-**Purpose**: Integration and unit tests
-
-- **`test_ocr.py`** - OCR engine tests
-- **`test_devanagari.py`** - Devanagari-specific tests
-- **`test_hash_system.py`** - Image hash system tests
-- **`debug_ocr.py`** - OCR debugging utilities
-
-### `/archived/` - Archived Code
-**Purpose**: Code that is no longer used but kept for reference
-
-- **`scraping/`** - Dictionary building scripts (archived after dictionary was completed)
-
-### `/logs/` - Log Files
-**Purpose**: Application logs (OCR processing, errors, performance)
-
-### `/uploads/` - Uploaded Files
-**Purpose**: Temporary storage for uploaded images (should be cleaned periodically)
-
-### `/__pycache__/` - Python Cache
-**Purpose**: Compiled Python bytecode (auto-generated, should be in .gitignore)
-
-### `/.venv/` - Virtual Environment
-**Purpose**: Python virtual environment (auto-generated, should be in .gitignore)
-
----
-
-## Recent Restructuring Changes
-
-The following changes were made to clean up the project structure:
-
-### Removed:
-- **`/src/core/`** - Custom ML training files (not used in current workflow)
-- **`/src/`** - Empty after moving database and utils
-- **`/postOCR/scraping/`** - Archived to `/archived/scraping/` (dictionary building scripts)
-- **Duplicate startup scripts** - Removed `start.bat`, `stop.bat`, `START_APP.bat`, `STOP_APP.bat`
-
-### Renamed:
-- **`/postOCR/`** → **`/correction/`** - Clearer naming for text correction module
-
-### Moved:
-- **`/src/database/`** → **`/database/`** - Moved to root level for easier access
-- **`/src/utils/`** → **`/utils/`** - Moved to root level for easier access
-
----
-
-## File Dependency Map
-
-### Critical Files (Cannot Remove):
-- `postocr_integration.py` - Bridges OCR with correction
-- `web/app.py` - Main application
-- `ocr/*.py` - OCR engines
-- `correction/src/core/*.py` - Correction logic
-- `database/db.py` - Database connection
-- `utils/*.py` - Utility functions
-
-### Optional Files (Can Archive):
-- `archived/scraping/*.py` - Dictionary building (if dictionary is complete)
-- `tests/debug_*.py` - Debug scripts
-
-### Generated Files (Should Not Commit):
-- `__pycache__/`
-- `.venv/`
-- `uploads/`
-- `logs/`
-- `.env` (use .env.example instead)
-
----
-
-## Import Paths After Restructuring
-
-### Updated Import Paths:
-- `from src.database.db import get_db` → `from database.db import get_db`
-- `from src.utils.cer import compute_cer` → `from utils.cer import compute_cer`
-- `from src.utils.image_hash import compute_image_hash` → `from utils.image_hash import compute_image_hash`
-- `from postOCR.src.core.corrector import OCRCorrector` → `from correction.corrector import OCRCorrector`
-
-### Files Updated:
-- `postocr_integration.py` - Updated correction module paths
-- `web/app.py` - Updated database and utils imports
-- `tests/test_hash_system.py` - Updated database and utils imports
-- `similarity/search.py` - Updated database import
-- `database/migrate_db.py` - Updated database import
-- `scripts/export_train_json.py` - Updated database import
+- [README](README.md): setup, running, and usage.
+- [Architecture](ARCHITECTURE.md): components and storage boundaries.
+- [Complete flow](COMPLETE_FLOW_DOCUMENTATION.md): upload, OCR, search, review, and save.
+- [Embedding plan](DUAL_EMBEDDING_PLAN.md): dual-text storage and search behavior.

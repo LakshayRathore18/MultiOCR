@@ -113,7 +113,7 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
     
     try:
         query = """
-            SELECT id, corrected_text, ocr_text, image_path, cer, status, version,
+            SELECT id, corrected_text, ocr_text, image_path, cer, status, updated_at,
                    text_embedding, ocr_embedding
             FROM documents
         """
@@ -130,7 +130,7 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
     
     matches = []
     for row in rows:
-        (doc_id, corrected_text, ocr_text, image_path, cer, status, version,
+        (doc_id, corrected_text, ocr_text, image_path, cer, status, updated_at,
          text_embedding, ocr_embedding) = row
         
         # Prefer corrected text over OCR text
@@ -175,7 +175,7 @@ def find_similar_documents(current_text: str = None, current_embedding: list = N
                 "image_path": image_path,
                 "cer": round(cer, 4) if cer is not None else None,
                 "status": status,
-                "version": version,
+                "updated_at": updated_at.isoformat() if updated_at else None,
                 "has_correction": has_correction,
                 "similarity_method": "cosine" if used_embedding else "jaccard",
                 "_rank_score": score,

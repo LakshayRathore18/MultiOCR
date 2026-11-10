@@ -9,7 +9,7 @@ both vectors. Rank each document by its stronger valid cosine match and return
 it only once (raw OCR wins ties).
 
 Always show both **Original OCR** and **Saved Correction** for every result,
-regardless of which version matched. Show “No saved correction” when absent.
+regardless of which source matched. Show “No saved correction” when absent.
 Provide separate copy actions and retain the document link. Results remain
 references. Upload processing always returns fresh OCR; similar documents never
 automatically replace it with a previous record's text or correction.
@@ -59,6 +59,15 @@ then backfill existing records. Keep the current model and candidate limit;
 model selection and chunking are outside this task.
 
 ## Progress
+
+- Replaced revision-number displays and timeline with original/correction save
+  information and last-edited timestamps. Removed obsolete request/session
+  metadata and upgraded the live schema without changing any retained field
+  across 10 documents. Updated setup, migration, README, architecture, flow,
+  structure, and workspace guides. Only the cleanup migration names retired
+  columns, so existing installations can remove them.
+- Current checks: 26 Python and 11 frontend tests, plus JavaScript syntax checks.
+  Verified legacy-schema upgrade and a repeated migration in an isolated schema.
 
 - Final UI keeps only the section/document icons, with blue information strips
   and blue/green text accents. Removed the forced 700px OCR-panel minimum

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-Model OCR - Document Parser</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v=compact-ocr-height">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v=document-status">
 </head>
 <body>
     <div class="container">
@@ -164,6 +164,7 @@
     </div>
 
     <script src="{{ url_for('static', path='similar_documents.js') }}?v=vibrant-references"></script>
-    <script src="{{ url_for('static', path='script.js') }}?v=restored"></script>
+    <script src="{{ url_for('static', path='document_status.js') }}?v=document-status"></script>
+    <script src="{{ url_for('static', path='script.js') }}?v=document-status"></script>
 </body>
 </html>
